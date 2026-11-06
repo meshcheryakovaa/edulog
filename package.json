@@ -1,0 +1,14 @@
+{
+  "name": "edulog",
+  "version": "1.0.0",
+  "private": true,
+  "description": "План и расписание: недельный план нагрузки и сетка расписания в одном HTML-файле",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "npx --yes serve src"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
