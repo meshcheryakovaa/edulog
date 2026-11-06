@@ -93,15 +93,29 @@ async function fetchSched(){
     SCHED_DB=true;return {rows:rows||[],ups:ups||[]};
   }catch(e){if(missingTable(e)){SCHED_DB=false;return null}throw e}
 }
+// Словари: короткие названия, список свойств и свойства строк плана
+let DICT_DB=true; // false — в базе ещё нет таблиц dict_names / props / row_props
+const DICT_HINT='В базе нет таблиц словарей: администратору нужно ещё раз выполнить supabase/schema.sql в Supabase → SQL Editor.';
+async function fetchDict(){
+  try{
+    const [names,props,rprops]=await Promise.all([
+      api('/rest/v1/dict_names?select=kind,key,short'),
+      api('/rest/v1/props?select=id,name,short,color,sort&order=sort,name'),
+      api('/rest/v1/row_props?select=grp,disc,prop_id'),
+    ]);
+    DICT_DB=true;return {names:names||[],props:props||[],rprops:rprops||[]};
+  }catch(e){if(missingTable(e)){DICT_DB=false;return null}throw e}
+}
 function schedMeta(rows,ups){
   const u=ups[0];
   return {name:(ups.find(x=>x.file)||{}).file||'',updated_at:u.at,author:u.author,ver:u.id,weeks:rows.length,size:rows.reduce((a,r)=>a+(r.content||'').length,0)};
 }
 async function loadData(){
-  const [ds,zs,sd]=await Promise.all([
+  const [ds,zs,sd,dc]=await Promise.all([
     api('/rest/v1/datasets?select=kind,name,content,author,updated_at,size'),
     api('/rest/v1/zachety?select=grp,code'),
     fetchSched(),
+    fetchDict(),
   ]);
   A.clear();META={};
   for(const d of ds||[]){
@@ -112,8 +126,10 @@ async function loadData(){
   // иначе — расписание, опубликованное раньше одним файлом (перенесётся при первой публикации).
   if(sd&&sd.ups.length){META.sched=schedMeta(sd.rows,sd.ups);A.loadSchedDB(sd.rows,sd.ups,META.sched)}
   A.setFlags(zs||[]);
+  A.setDict(dc||{});
   A.refresh();
   if(!SCHED_DB&&canEdit()) A.toast(SCHEMA_HINT,true);
+  else if(!DICT_DB&&canEdit()) A.toast(DICT_HINT,true);
 }
 // Тихо подтянуть изменения, если кто-то опубликовал новое или поменял зачёты.
 let lastCheck=0;
@@ -121,11 +137,12 @@ async function checkUpdates(){
   if(!canRead()||Date.now()-lastCheck<15000) return;
   lastCheck=Date.now();
   try{
-    const [ds,zs,top]=await Promise.all([
+    const [ds,zs,top,dc]=await Promise.all([
       api('/rest/v1/datasets?select=kind,name,author,updated_at,size'),
       api('/rest/v1/zachety?select=grp,code'),
       // спрашиваем всегда: если таблиц не было, а schema.sql уже выполнили, расписание подтянется без перезагрузки
       api('/rest/v1/sched_uploads?select=id&order=id.desc&limit=1').then(r=>{SCHED_DB=true;return r},e=>{if(missingTable(e)) SCHED_DB=false;return null}),
+      fetchDict().catch(()=>null),
     ]);
     let changed=false;
     const schedLocal=A.sched&&A.sched.local;
@@ -148,6 +165,7 @@ async function checkUpdates(){
       if(!(ds||[]).some(d=>d.kind===k)){delete META[k];const cur=k==='plan'?A.plan:A.sched;if(cur&&!cur.local){A.clear(k);changed=true}}
     }
     if(!flagBusy) A.setFlags(zs||[]);
+    if(dc&&!dictBusy) A.setDict(dc);
     if(changed) A.toast('Загружена новая версия опубликованных данных');
     A.refresh();
   }catch(e){}
@@ -176,6 +194,31 @@ async function writeFlags(pairs,on){
   await Promise.all([...by].map(([g,cs])=>api('/rest/v1/zachety?grp=eq.'+q(g)+'&code=in.'+q(inList([...cs])),{method:'DELETE',headers:{Prefer:'return=minimal'}})));
 }
 const saveFlag=(groups,code,on)=>saveFlags([[groups,code]],on);
+/* Изменение словаря: op.t — name (короткое название), props (добавить/изменить свойства),
+   propDel (удалить свойство вместе с отметками), rp (поставить/снять свойство у строк плана) */
+let dictBusy=0;
+async function saveDict(op){
+  if(!DICT_DB) throw new Error(DICT_HINT);
+  dictBusy++;
+  try{await writeDict(op)}
+  catch(e){if(missingTable(e)){DICT_DB=false;throw new Error(DICT_HINT)}throw e}
+  finally{dictBusy--}
+}
+async function writeDict(op){
+  const MIN={Prefer:'return=minimal'},UPS={Prefer:'resolution=merge-duplicates,return=minimal'};
+  if(op.t==='name'){
+    if(op.short) await api('/rest/v1/dict_names?on_conflict=kind,key',{method:'POST',headers:UPS,body:{kind:op.kind,key:op.key,short:op.short}});
+    else await api('/rest/v1/dict_names?kind=eq.'+q(op.kind)+'&key=eq.'+q(op.key),{method:'DELETE',headers:MIN});
+  }else if(op.t==='props'){
+    await api('/rest/v1/props?on_conflict=id',{method:'POST',headers:UPS,body:op.list.map(p=>({id:p.id,name:p.name,short:p.short||'',color:p.color,sort:p.sort}))});
+  }else if(op.t==='propDel'){
+    await api('/rest/v1/props?id=eq.'+q(op.id),{method:'DELETE',headers:MIN});
+  }else if(op.t==='rp'){
+    if(op.on) await api('/rest/v1/row_props?on_conflict=grp,disc,prop_id',{method:'POST',headers:{Prefer:'resolution=ignore-duplicates,return=minimal'},
+      body:op.rows.map(([grp,disc])=>({grp,disc,prop_id:op.id}))});
+    else await Promise.all(op.rows.map(([g,d])=>api('/rest/v1/row_props?grp=eq.'+q(g)+'&disc=eq.'+q(d)+'&prop_id=eq.'+q(op.id),{method:'DELETE',headers:MIN})));
+  }
+}
 /* Одна загрузка расписания: недели сравниваются с тем, что сейчас в базе на сервере
    (а не с тем, что было открыто), поэтому журнал верен, даже если кто-то успел опубликовать раньше. */
 const inList=keys=>'('+keys.map(k=>'"'+String(k).replace(/["\\]/g,'')+'"').join(',')+')';
@@ -342,7 +385,7 @@ function renderMe(){
 
 /* ---------- Вход / выход ---------- */
 function signedOut(note){
-  keep(null);ME=null;META={};A.clear();A.setFlags([]);A.setCanFlag(false);renderMe();
+  keep(null);ME=null;META={};A.clear();A.setFlags([]);A.setDict({});A.setCanFlag(false);renderMe();
   if(A.view==='admin') A.setView('plan');else A.refresh();
   showGate('in',note);
 }
@@ -395,10 +438,17 @@ const ACT={
   'sched.upload':d=>d.file?`загрузил(а) расписание «${d.file}»: ${schedWeeksText(d.weeks||[])}`:`удалил(а) из расписания ${schedWeeksText(d.weeks||[])}`,
   'zachet.on':d=>`отметил(а) зачёт ${d.code} у группы ${d.group}`,
   'zachet.off':d=>`снял(а) зачёт ${d.code} у группы ${d.group}`,
+  'dict.name':d=>d.short?`короткое название «${d.short}» для «${d.key}» (${DICT_KIND[d.kind]||d.kind})`:`убрал(а) короткое название у «${d.key}» (${DICT_KIND[d.kind]||d.kind})`,
+  'prop.add':d=>`добавил(а) свойство строк «${d.name}»`,
+  'prop.edit':d=>d.from&&d.from!==d.name?`переименовал(а) свойство «${d.from}» в «${d.name}»`:`изменил(а) свойство «${d.name}»`,
+  'prop.delete':d=>`удалил(а) свойство строк «${d.name}»`,
+  'prop.on':d=>`поставил(а) свойство «${d.prop}» строке «${d.disc}» группы ${d.group}`,
+  'prop.off':d=>`снял(а) свойство «${d.prop}» со строки «${d.disc}» группы ${d.group}`,
   'user.register':d=>`регистрация ${d.email}${d.role==='admin'?' (первый пользователь — администратор)':''}`,
   'user.role':d=>`${d.email}: ${ROLES[d.from]||d.from} → ${ROLES[d.to]||d.to}`,
   'user.delete':d=>`удалён пользователь ${d.email}`,
 };
+const DICT_KIND={disc:'дисциплина',teacher:'преподаватель',group:'группа',room:'аудитория'};
 function schedWeeksText(ws){
   const T={new:'новая',upd:'обновлена',same:'без изменений',del:'удалена'};
   return ws.map(w=>`нед. ${w.week||w.k} — ${T[w.st]||w.st}`).join(', ')||'без изменений';
@@ -445,7 +495,7 @@ function renderAdmin(main){
     const row=(kind,title)=>{const m=META[kind];return `<tr><td>${title}</td>${m?`<td>${esc(m.name)}${m.weeks!=null?`<div class="sub">${m.weeks} нед. в базе</div>`:''}</td><td class="num">${(m.size/1024).toFixed(0)} КБ</td><td>${esc(m.author||'—')}</td><td class="num">${esc(fmt(m.updated_at))}</td><td><button class="btn ghost sm danger" data-unpub="${kind}">Снять с публикации</button></td>`:'<td colspan="5" class="sub">не опубликовано</td>'}</tr>`};
     body=`<section class="panel"><h2>Опубликованные файлы</h2><div class="tbl-wrap"><table class="adm"><thead><tr><th></th><th>Файл</th><th>Размер</th><th>Опубликовал(а)</th><th>Когда</th><th></th></tr></thead><tbody>
       ${row('plan','План')}${row('sched','Расписание')}</tbody></table></div>
-      ${SCHED_DB?'':`<p class="note err">${esc(SCHEMA_HINT)}</p>`}
+      ${SCHED_DB?'':`<p class="note err">${esc(SCHEMA_HINT)}</p>`}${DICT_DB?'':`<p class="note err">${esc(DICT_HINT)}</p>`}
       <p class="note">Новую версию публикует редактор или администратор: «Открыть файлы…» в шапке, затем «Опубликовать». Все пользователи увидят её при следующем открытии вкладки.</p></section>`;
   }else{
     body=`<section class="panel"><h2>Журнал действий <span class="legend">последние ${ADM.log.length}</span></h2>`+
@@ -494,7 +544,7 @@ document.addEventListener('change',e=>{
 });
 
 /* ---------- Экспорт для app.js ---------- */
-window.EduLOGCloud={saveFlag,saveFlags,isAdmin,renderAdmin,onSources};
+window.EduLOGCloud={saveFlag,saveFlags,saveDict,isAdmin,renderAdmin,onSources};
 
 /* ---------- Старт ---------- */
 (async()=>{

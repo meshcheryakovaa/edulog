@@ -4,8 +4,8 @@
 --
 -- Роли пользователей (profiles.role):
 --   pending  — зарегистрировался, ждёт одобрения администратора (данных не видит);
---   viewer   — просмотр опубликованных плана, расписания и отметок зачётов;
---   editor   — плюс публикация файлов плана/расписания и отметки зачётов;
+--   viewer   — просмотр опубликованных плана, расписания, отметок зачётов и словарей;
+--   editor   — плюс публикация файлов плана/расписания, отметки зачётов и правка словарей;
 --   admin    — плюс управление пользователями и журнал действий;
 --   blocked  — доступ закрыт.
 -- Первый зарегистрированный пользователь автоматически становится администратором.
@@ -229,6 +229,75 @@ end $$;
 revoke all on function public.sched_apply(text, jsonb, text[], jsonb) from public, anon;
 grant execute on function public.sched_apply(text, jsonb, text[], jsonb) to authenticated;
 
+-- ---------- Словари ----------
+-- dict_names — короткие названия для отображения на экране. Истинное название — ключ (key):
+--   disc    — дисциплина без «1-»/«2-» и «(1 подгруппа)», как в расписании;
+--   teacher — ключ преподавателя (фамилия и первая буква инициалов, нижний регистр);
+--   group, room — название группы / аудитории как в файлах.
+-- props — список свойств строк недельного плана; row_props — какие свойства стоят у строки
+--   (группа + название строки плана). Удаление свойства снимает его со всех строк.
+create table if not exists public.dict_names (
+  kind        text not null check (kind in ('disc','teacher','group','room')),
+  key         text not null,
+  short       text not null check (length(short) between 1 and 200),
+  updated_by  uuid references auth.users(id) on delete set null default auth.uid(),
+  updated_at  timestamptz not null default now(),
+  primary key (kind, key)
+);
+create table if not exists public.props (
+  id          text primary key,
+  name        text not null check (length(name) between 1 and 200),
+  short       text not null default '' check (length(short) <= 40),
+  color       text not null default '#1c6a85' check (color ~ '^#[0-9a-fA-F]{6}$'),
+  sort        integer not null default 0,
+  updated_by  uuid references auth.users(id) on delete set null default auth.uid(),
+  updated_at  timestamptz not null default now()
+);
+create table if not exists public.row_props (
+  grp         text not null,
+  disc        text not null,
+  prop_id     text not null references public.props(id) on delete cascade,
+  updated_by  uuid references auth.users(id) on delete set null default auth.uid(),
+  updated_at  timestamptz not null default now(),
+  primary key (grp, disc, prop_id)
+);
+create index if not exists row_props_prop on public.row_props (prop_id);
+
+create or replace function public.touch_row()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  new.updated_by := auth.uid();
+  new.updated_at := now();
+  return new;
+end $$;
+drop trigger if exists dict_names_touch on public.dict_names;
+create trigger dict_names_touch before insert or update on public.dict_names
+  for each row execute function public.touch_row();
+drop trigger if exists props_touch on public.props;
+create trigger props_touch before insert or update on public.props
+  for each row execute function public.touch_row();
+drop trigger if exists row_props_touch on public.row_props;
+create trigger row_props_touch before insert or update on public.row_props
+  for each row execute function public.touch_row();
+
+alter table public.dict_names enable row level security;
+alter table public.props enable row level security;
+alter table public.row_props enable row level security;
+do $$
+declare t text;
+begin
+  foreach t in array array['dict_names','props','row_props'] loop
+    execute format('drop policy if exists %1$s_select on public.%1$s', t);
+    execute format('create policy %1$s_select on public.%1$s for select to authenticated using (public.can_read())', t);
+    execute format('drop policy if exists %1$s_insert on public.%1$s', t);
+    execute format('create policy %1$s_insert on public.%1$s for insert to authenticated with check (public.can_edit())', t);
+    execute format('drop policy if exists %1$s_update on public.%1$s', t);
+    execute format('create policy %1$s_update on public.%1$s for update to authenticated using (public.can_edit()) with check (public.can_edit())', t);
+    execute format('drop policy if exists %1$s_delete on public.%1$s', t);
+    execute format('create policy %1$s_delete on public.%1$s for delete to authenticated using (public.can_edit())', t);
+  end loop;
+end $$;
+
 -- ---------- Журнал действий (видит только администратор) ----------
 create table if not exists public.audit_log (
   id          bigint generated always as identity primary key,
@@ -263,6 +332,32 @@ begin
     if tg_op = 'DELETE' then act := 'zachet.off'; det := jsonb_build_object('group', old.grp, 'code', old.code);
     else act := 'zachet.on'; det := jsonb_build_object('group', new.grp, 'code', new.code);
     end if;
+  elsif tg_table_name = 'dict_names' then
+    act := 'dict.name';
+    if tg_op = 'DELETE' then det := jsonb_build_object('kind', old.kind, 'key', old.key, 'short', null);
+    elsif tg_op = 'UPDATE' and new.short is not distinct from old.short then return null;
+    else det := jsonb_build_object('kind', new.kind, 'key', new.key, 'short', new.short);
+    end if;
+  elsif tg_table_name = 'props' then
+    if tg_op = 'DELETE' then act := 'prop.delete'; det := jsonb_build_object('name', old.name);
+    elsif tg_op = 'INSERT' then act := 'prop.add'; det := jsonb_build_object('name', new.name);
+    elsif new.name is distinct from old.name or new.short is distinct from old.short or new.color is distinct from old.color then
+      act := 'prop.edit'; det := jsonb_build_object('from', old.name, 'name', new.name);
+    else
+      return null;  -- только порядок в списке
+    end if;
+  elsif tg_table_name = 'row_props' then
+    if tg_op = 'DELETE' then
+      -- свойство удалено целиком: отметки снимаются каскадом, отдельно их не пишем
+      if not exists (select 1 from public.props where id = old.prop_id) then return null; end if;
+      act := 'prop.off';
+      det := jsonb_build_object('group', old.grp, 'disc', old.disc, 'prop', (select name from public.props where id = old.prop_id));
+    elsif tg_op = 'INSERT' then
+      act := 'prop.on';
+      det := jsonb_build_object('group', new.grp, 'disc', new.disc, 'prop', (select name from public.props where id = new.prop_id));
+    else
+      return null;
+    end if;
   elsif tg_table_name = 'profiles' then
     if tg_op = 'DELETE' then act := 'user.delete'; det := jsonb_build_object('email', old.email);
     elsif tg_op = 'INSERT' then act := 'user.register'; det := jsonb_build_object('email', new.email, 'role', new.role);
@@ -286,6 +381,15 @@ create trigger sched_uploads_audit after insert on public.sched_uploads
 drop trigger if exists zachety_audit on public.zachety;
 create trigger zachety_audit after insert or delete on public.zachety
   for each row execute function public.audit();
+drop trigger if exists dict_names_audit on public.dict_names;
+create trigger dict_names_audit after insert or update or delete on public.dict_names
+  for each row execute function public.audit();
+drop trigger if exists props_audit on public.props;
+create trigger props_audit after insert or update or delete on public.props
+  for each row execute function public.audit();
+drop trigger if exists row_props_audit on public.row_props;
+create trigger row_props_audit after insert or update or delete on public.row_props
+  for each row execute function public.audit();
 drop trigger if exists profiles_audit on public.profiles;
 create trigger profiles_audit after insert or update or delete on public.profiles
   for each row execute function public.audit();
@@ -297,5 +401,7 @@ grant select, insert, update, delete on public.datasets to authenticated;
 grant select, insert, update, delete on public.zachety to authenticated;
 grant select, insert, update, delete on public.sched_weeks to authenticated;
 grant select, insert on public.sched_uploads to authenticated;
+grant select, insert, update, delete on public.dict_names, public.props, public.row_props to authenticated;
 grant select on public.audit_log to authenticated;
-revoke all on public.profiles, public.datasets, public.zachety, public.audit_log, public.sched_weeks, public.sched_uploads from anon;
+revoke all on public.profiles, public.datasets, public.zachety, public.audit_log, public.sched_weeks, public.sched_uploads,
+  public.dict_names, public.props, public.row_props from anon;
