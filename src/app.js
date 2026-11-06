@@ -607,6 +607,15 @@ function lessonCard(c,mode,w,compact){
   const other=mode==='teacher'?R:T;
   return `<div class="${cls}">${zt}${grp}<div class="ls-s" title="${esc(c.subject)}">${esc(c.subject)}</div><div class="ls-m"><span>${other}</span>${sg}${odd}${conf}</div></div>`;
 }
+/* Ячейка пары: занятие всей группы — на всю ширину, 1 подгруппа — левая половина, 2 подгруппа — правая.
+   Если занята только одна подгруппа, вторая половина остаётся пустой. */
+function slotBody(its,gs,mode,w,compact){
+  const half=sg=>its.filter(c=>c.subgroup===sg).map(c=>lessonCard(c,mode,w,compact)).join('')+gs.filter(g=>g.subgroup===sg).map(g=>ghostCard(g,mode)).join('');
+  const full=its.filter(c=>c.subgroup!==1&&c.subgroup!==2).map(c=>lessonCard(c,mode,w,compact)).join('')+gs.filter(g=>g.subgroup!==1&&g.subgroup!==2).map(g=>ghostCard(g,mode)).join('');
+  const a=half(1),b=half(2);
+  const pair=a||b?`<div class="sg2"><div class="sg-h l">${a||'<div class="sg-free" title="1 подгруппа свободна">1 п/г —</div>'}</div><div class="sg-h r">${b||'<div class="sg-free" title="2 подгруппа свободна">2 п/г —</div>'}</div></div>`:'';
+  return full+pair;
+}
 function weekTable(cs,mode,w,compact,ghosts){
   const head=DAYS.map((d,i)=>`<th scope="col"><span>${d}</span><small>${esc(w.dates[i+1]||'')}</small></th>`).join('');
   let rows='';
@@ -614,7 +623,7 @@ function weekTable(cs,mode,w,compact,ghosts){
     const tm=w.times[p]||['',''];
     rows+='<tr>'+DAYS.map((_,i)=>{const its=cs.filter(c=>c.day===i+1&&c.period===p);
       const gs=(ghosts||[]).filter(g=>g.day===i+1&&g.period===p);
-      return `<td><div class="slot-h"><span>${p} пара</span><time>${esc(tm[0])}–${esc(tm[1])}</time></div>${its.length?its.map(c=>lessonCard(c,mode,w,compact)).join(''):(gs.length?'':'<div class="nil">—</div>')}${gs.map(g=>ghostCard(g,mode)).join('')}</td>`}).join('')+'</tr>';
+      return `<td><div class="slot-h"><span>${p} пара</span><time>${esc(tm[0])}–${esc(tm[1])}</time></div>${its.length||gs.length?slotBody(its,gs,mode,w,compact):'<div class="nil">—</div>'}</td>`}).join('')+'</tr>';
   }
   return `<div class="wk-wrap"><table class="wk"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
 }
@@ -664,7 +673,7 @@ function renderSched(key){
   const chp=entityChangesPanel(mode,key,{week:w.key,quiet:true});
   if(!recs.length){main.innerHTML=head+emptyCard('Нет занятий',`На этой неделе в расписании нет занятий: ${esc(label(mode,key))}.`)+chp+reconPanel(mode,key,w);return}
   main.innerHTML=head+`<dl class="stats">${stats}</dl>
-    <div class="legend"><span>Клик по преподавателю, аудитории или группе открывает её расписание</span><span>Правый клик — быстрый просмотр недели</span><span>Серые карточки — подгруппы</span>${chn?'<span>«Новое», «Изменено», «Отменено» — по последней загрузке этой недели</span>':''}</div>
+    <div class="legend"><span>Клик по преподавателю, аудитории или группе открывает её расписание</span><span>Правый клик — быстрый просмотр недели</span><span>Во всю ширину — вся группа, слева — 1 подгруппа, справа — 2 подгруппа</span>${chn?'<span>«Новое», «Изменено», «Отменено» — по последней загрузке этой недели</span>':''}</div>
     ${weekTable(cs,mode,w,false,ghosts)}${chp}${mode!=='room'?reconPanel(mode,key,w):''}`;
 }
 function renderRoomsGrid(w){
@@ -958,6 +967,18 @@ function pdfGroupCell(its){
   }
   return out;
 }
+/* как на экране: вся группа — во всю ширину, 1 п/г — левая колонка, 2 п/г — правая */
+function pdfSlot(its,mode){
+  const part=xs=>!xs.length?[]:mode==='group'?pdfGroupCell(xs):xs.map(c=>pdfLesson(c,mode,xs.length));
+  const isH=c=>c.subgroup===1||c.subgroup===2;
+  const a=its.filter(c=>c.subgroup===1),b=its.filter(c=>c.subgroup===2);
+  const out=part(its.filter(c=>!isH(c)));
+  if(a.length||b.length){
+    const free=n=>({text:n+' п/г —',color:PC.rule,fontSize:6.3});
+    out.push({columns:[{width:'*',stack:a.length?part(a):[free(1)]},{width:'*',stack:b.length?part(b):[free(2)]}],columnGap:4});
+  }
+  return out;
+}
 function pdfWeekPage(mode,key,w,brk){
   const recs=schedRecs(mode,key,w),cs=cards(recs,mode);
   const head=[{text:'Пара',style:'th'}].concat(DAYS.map((d,i)=>({text:[d+'\n',{text:w.dates[i+1]||'',bold:false,color:PC.muted,fontSize:7}],style:'th'})));
@@ -967,7 +988,7 @@ function pdfWeekPage(mode,key,w,brk){
     const row=[{stack:[{text:String(p),bold:true,fontSize:11},{text:tm[0]+'\n'+tm[1],fontSize:6.5,color:PC.muted}]}];
     for(let d=1;d<=6;d++){
       const its=cs.filter(c=>c.day===d&&c.period===p);
-      row.push(its.length?{stack:mode==='group'?pdfGroupCell(its):its.map(c=>pdfLesson(c,mode,its.length)),fillColor:its.some(c=>c.zach)?PC.zf:(its.every(c=>c.subgroup)?PC.sub:PC.fill)}:{text:''});
+      row.push(its.length?{stack:pdfSlot(its,mode),fillColor:its.some(c=>c.zach)?PC.zf:(its.every(c=>c.subgroup)?PC.sub:PC.fill)}:{text:''});
     }
     body.push(row);
   }
