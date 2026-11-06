@@ -63,10 +63,21 @@ html = html.replace(/<script\b([^>]*)>\s*<\/script>/gi, (tag, attrs) => {
   return `<script${rest}>${guard(body, 'script', src)}</script>`;
 });
 
+// Настройки Supabase из окружения (переменные репозитория в GitHub Actions)
+// подменяют значения из src/config.js.
+for (const [key, env] of [['supabaseUrl', 'SUPABASE_URL'], ['supabaseAnonKey', 'SUPABASE_ANON_KEY']]) {
+  const val = (process.env[env] || '').trim();
+  if (!val) continue;
+  const re = new RegExp(`(${key}\\s*:\\s*)(['"])[^'"]*\\2`);
+  if (!re.test(html)) throw new Error(`Не найдено поле ${key} в config.js`);
+  html = html.replace(re, (_, pre) => pre + JSON.stringify(val));
+}
+const cloud = /supabaseUrl\s*:\s*(['"])[^'"]+\1/.test(html);
+
 if (version) {
   html = html.replace(/<title>([^<]*)<\/title>/i, (_, t) => `<title>${t}</title>\n<meta name="version" content="${version}">`);
 }
 
 mkdirSync(dirname(out), { recursive: true });
 writeFileSync(out, html);
-console.log(`Собрано: ${out} (${(Buffer.byteLength(html) / 1024).toFixed(1)} КБ)`);
+console.log(`Собрано: ${out} (${(Buffer.byteLength(html) / 1024).toFixed(1)} КБ)` + (cloud ? ', многопользовательский режим' : ', локальный режим'));
