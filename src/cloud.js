@@ -153,10 +153,17 @@ async function checkUpdates(){
 document.addEventListener('visibilitychange',()=>{if(!document.hidden) checkUpdates()});
 addEventListener('focus',checkUpdates);
 
-async function saveFlag(groups,code,on){
-  if(on) await api('/rest/v1/zachety?on_conflict=grp,code',{method:'POST',headers:{Prefer:'resolution=ignore-duplicates,return=minimal'},body:groups.map(g=>({grp:g,code}))});
-  else await Promise.all(groups.map(g=>api('/rest/v1/zachety?grp=eq.'+q(g)+'&code=eq.'+q(code),{method:'DELETE',headers:{Prefer:'return=minimal'}})));
+async function saveFlags(pairs,on){
+  if(on){
+    const rows=[],seen=new Set();
+    for(const [gs,code] of pairs) for(const g of gs){const k=g+'\n'+code;if(!seen.has(k)){seen.add(k);rows.push({grp:g,code})}}
+    await api('/rest/v1/zachety?on_conflict=grp,code',{method:'POST',headers:{Prefer:'resolution=ignore-duplicates,return=minimal'},body:rows});
+    return;
+  }
+  const by=new Map();for(const [gs,code] of pairs) for(const g of gs) (by.get(g)||by.set(g,new Set()).get(g)).add(code);
+  await Promise.all([...by].map(([g,cs])=>api('/rest/v1/zachety?grp=eq.'+q(g)+'&code=in.'+q(inList([...cs])),{method:'DELETE',headers:{Prefer:'return=minimal'}})));
 }
+const saveFlag=(groups,code,on)=>saveFlags([[groups,code]],on);
 /* Одна загрузка расписания: недели сравниваются с тем, что сейчас в базе на сервере
    (а не с тем, что было открыто), поэтому журнал верен, даже если кто-то успел опубликовать раньше. */
 const inList=keys=>'('+keys.map(k=>'"'+String(k).replace(/["\\]/g,'')+'"').join(',')+')';
@@ -469,7 +476,7 @@ document.addEventListener('change',e=>{
 });
 
 /* ---------- Экспорт для app.js ---------- */
-window.EduLOGCloud={saveFlag,isAdmin,renderAdmin,onSources};
+window.EduLOGCloud={saveFlag,saveFlags,isAdmin,renderAdmin,onSources};
 
 /* ---------- Старт ---------- */
 (async()=>{

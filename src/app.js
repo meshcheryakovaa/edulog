@@ -399,14 +399,18 @@ function applyFlag(groups,code,on){
   for(const g of groups){let s=FLAGS.get(g);if(!s){s=new Set();FLAGS.set(g,s)}on?s.add(code):s.delete(code);if(!s.size) FLAGS.delete(g)}
   FVER++;
 }
-function setFlag(groups,code,on){
+/* pairs — [[группы, код], …]: одна отметка или сразу все строки таблицы */
+function setFlags(pairs,on){
   if(CLOUD&&!CAN_FLAG){render();return}
-  applyFlag(groups,code,on);render();
+  pairs=pairs.filter(([gs,c])=>gs.some(g=>isZ(g,c)!==on));
+  if(!pairs.length){render();return}
+  pairs.forEach(([gs,c])=>applyFlag(gs,c,on));render();
   if(!CLOUD){saveLocalFlags();return}
-  Promise.resolve(window.EduLOGCloud&&window.EduLOGCloud.saveFlag(groups,code,on)).catch(e=>{
-    applyFlag(groups,code,!on);render();toast(e&&e.message||'Не удалось сохранить отметку.',true);
+  Promise.resolve(window.EduLOGCloud&&window.EduLOGCloud.saveFlags(pairs,on)).catch(e=>{
+    pairs.forEach(([gs,c])=>applyFlag(gs,c,!on));render();toast(e&&e.message||'Не удалось сохранить отметку.',true);
   });
 }
+const setFlag=(groups,code,on)=>setFlags([[groups,code]],on);
 function fmtFull(d){return String(d.getDate()).padStart(2,'0')+'.'+String(d.getMonth()+1).padStart(2,'0')+'.'+d.getFullYear()}
 /* даты недели плана n: из расписания этой недели либо отсчётом от загруженной */
 function weekRange(n){
@@ -568,6 +572,8 @@ function renderPlan(key){
     const ws=totals.map((_,i)=>{const v=r.weeks[i]||0;return v?`<td class="w${curc(i)}${i===zl?' zl':''}" style="--h:${heat(v,cellMax)}"${i===zl?' title="Последняя пара — зачёт"':''}>${v}</td>`:`<td class="w z${curc(i)}">·</td>`}).join('');
     return `<tr class="${svc?'svc':''}"><th class="c-disc" scope="row"><div class="dd">${cb}<div>${grp}<span class="d-name">${esc(r.disc)}</span>${tags.length?`<span class="tags">${tags.join('')}</span>`:''}</div></div></th>${who}${room}<td class="c-num">${r.hours}${d!==r.hours?`<span class="sub">расст. ${d}</span>`:''}</td>${ws}<td class="c-num">${d}</td></tr>`;
   }).join('');
+  const zRows=rows.filter(r=>!kindOf(r.disc)),zOn=zRows.filter(r=>r.groups.every(g=>isZ(g,codeOf(r.disc)))).length;
+  const zAll=zRows.length?`<input type="checkbox" class="zcb" id="zAll" data-zstate="${zOn===zRows.length?'all':zOn?'some':'none'}" title="${CAN_FLAG?'Отметить зачётными все дисциплины в таблице (повторный щелчок — снять все)':'Менять отметки может редактор'}" aria-label="Зачёт: все дисциплины"${zOn===zRows.length?' checked':''}${CAN_FLAG?'':' disabled'}>`:'<span class="zcb-sp"></span>';
   const footW=totals.map((v,i)=>`<td class="w${curc(i)}" style="--h:${heat(v,barMax)}">${v||'·'}</td>`).join('');
   const span=(showWho?1:0)+(showRoom?1:0);
   const streams=rows.filter(r=>r.stream&&r.groups.length>1).length;
@@ -580,13 +586,16 @@ function renderPlan(key){
     ${fileTot?`<p class="note">Нагрузка группы взята из строки «ИТОГО» файла: параллельные подгруппы и потоки учтены один раз, поэтому сумма часов в таблице может быть больше.</p>`:''}
     ${streams&&!fileTot?`<p class="note">Потоковые занятия, общие для нескольких групп, посчитаны один раз (${streams} ${plural(streams,'строка','строки','строк')}).</p>`:''}
   </section>
-  <div class="legend"><span>Флажок слева — зачётная дисциплина: её последняя пара обведена здесь и помечена «зачёт» в расписании</span><span>Ячейка недели — число пар (1 пара = 2 ч)</span><span>«расст.» — по неделям расставлено меньше часов, чем по плану</span>${chW.size?'<span>Номер недели с точкой — в расписании этой недели были изменения (список внизу)</span>':''}</div>
+  <div class="legend"><span>Флажок слева — зачётная дисциплина: её последняя пара обведена здесь и помечена «зачёт» в расписании; флажок в шапке отмечает или снимает все сразу</span><span>Ячейка недели — число пар (1 пара = 2 ч)</span><span>«расст.» — по неделям расставлено меньше часов, чем по плану</span>${chW.size?'<span>Номер недели с точкой — в расписании этой недели были изменения (список внизу)</span>':''}</div>
   <div class="grid-wrap"><table>
-    <thead><tr><th class="c-disc" scope="col">${mode==='group'?'Дисциплина':'Группа и дисциплина'}</th>${showWho?'<th scope="col">Преподаватель</th>':''}${showRoom?'<th scope="col">Ауд.</th>':''}<th class="c-num" scope="col">Часы</th>${weekHead}<th class="c-num" scope="col">Расст.</th></tr></thead>
+    <thead><tr><th class="c-disc" scope="col"><div class="dd">${zAll}<span>${mode==='group'?'Дисциплина':'Группа и дисциплина'}</span></div></th>${showWho?'<th scope="col">Преподаватель</th>':''}${showRoom?'<th scope="col">Ауд.</th>':''}<th class="c-num" scope="col">Часы</th>${weekHead}<th class="c-num" scope="col">Расст.</th></tr></thead>
     <tbody>${body}</tbody>
     <tfoot><tr><td class="c-disc">${fileTot?'Итого по файлу':'Итого'}</td>${span?`<td colspan="${span}"></td>`:''}<td class="c-num">${plan}</td>${footW}<td class="c-num">${dsum}</td></tr></tfoot>
   </table></div>${entityChangesPanel(mode,key)}`;
+  const za=$('#zAll');if(za) za.indeterminate=za.dataset.zstate==='some';
+  ZROWS=zRows.map(r=>[r.groups,codeOf(r.disc)]);
 }
+let ZROWS=[];
 
 /* ---------- Вид «Расписание» ---------- */
 const linkT=t=>`<button class="link" data-go="teacher" data-key="${esc(t.key)}">${esc(tName(t.key))}</button>`;
@@ -907,6 +916,7 @@ document.addEventListener('click',e=>{
 document.addEventListener('change',e=>{
   if(e.target.id==='onlyMis'){st.onlyMis=e.target.checked;render();return}
   if(e.target.id==='chOnly'){st.chOnly=e.target.checked;render();return}
+  if(e.target.id==='zAll'){setFlags(ZROWS,e.target.checked);return}
   const z=e.target.closest('[data-zc]');if(z) setFlag(z.dataset.zg.split('\n'),z.dataset.zc,z.checked);
 });
 document.addEventListener('contextmenu',e=>{
@@ -979,7 +989,7 @@ function pdfWeekPage(mode,key,w,brk){
     {table:{headerRows:1,dontBreakRows:true,widths:[30,'*','*','*','*','*','*'],heights:i=>i?(w.maxP>6?44:56):undefined,body},layout:LAY}];
 }
 function sortedGroups(list){return list.slice().sort((a,b)=>(REG.courses[a]||99)-(REG.courses[b]||99)||coll.compare(a,b))}
-function pdfCreditPage(g,items,brk){
+function pdfCreditPage(g,items,brk,period,first,last){
   const head=['№','Дисциплина','П/г','Преподаватель','Неделя','День и пара','Ауд.'].map(x=>({text:x,style:'th'}));
   let guessed=null;
   const body=[head].concat(items.map((it,i)=>{
@@ -991,12 +1001,12 @@ function pdfCreditPage(g,items,brk){
     return [String(i+1),{text:it.name},it.pre?it.pre+' п/г':'вся группа',it.teachers.map(tName).join(', ')||'—',{text:String(it.week),alignment:'center'},when,it.rooms.join(', ')||'—'];
   }));
   const pg=planGroup(g);const course=REG.courses[g]?REG.courses[g]+' курс · ':'';
-  const out=[{text:'Зачёты группы '+g,style:'h',pageBreak:brk?'before':undefined},
-    {text:course+(pg?pg.students+' студентов · ':'')+items.length+' '+plural(items.length,'зачётная пара','зачётные пары','зачётных пар')+' за семестр',style:'s'},
+  const out=[{text:'Зачёты группы '+g,style:'h',pageBreak:brk&&!first?'before':undefined,margin:!brk&&!first?[0,16,0,0]:undefined},
+    {text:course+(pg?pg.students+' студентов · ':'')+items.length+' '+plural(items.length,'зачётная пара','зачётные пары','зачётных пар')+' '+(period||'за семестр'),style:'s'},
     {table:{headerRows:1,dontBreakRows:true,widths:[14,'*',44,92,34,104,62],body},layout:LAY,fontSize:8.5}];
   let note='Неделя — последняя неделя с парами по недельному плану; день, пара и аудитория — по загруженному расписанию.';
   if(guessed) note+=` Даты недель без расписания рассчитаны от недели ${guessed.week} (${guessed.start.replace(/-/g,'.')}) по 7 дней.`;
-  out.push({text:note,style:'note'});
+  if(brk||last) out.push({text:note,style:'note'});
   return out;
 }
 async function savePdf(doc,filename){
@@ -1024,11 +1034,62 @@ async function makePdf(kind){
     return savePdf(baseDoc(true,gs.flatMap((g,i)=>pdfWeekPage('group',g,w,i>0))),`Расписание всех групп, неделя ${w.week||''}.pdf`);
   }
   if(!PLAN) return toast('Для зачётов нужен недельный план (.txt).',true);
-  const gs=sortedGroups([...FLAGS.keys()].filter(g=>planGroup(g)));
-  const pages=gs.map(g=>[g,creditItems(g)]).filter(x=>x[1].length);
-  if(!pages.length) return toast('Нет отмеченных зачётных дисциплин: поставьте флажки в недельном плане.',true);
-  return savePdf(baseDoc(false,pages.flatMap(([g,its],i)=>pdfCreditPage(g,its,i>0))),'Зачёты за семестр.pdf');
+  openCreditDlg();
 }
+
+/* ---------- Печать зачётов: выбор групп и недель ---------- */
+const ZD={pick:new Set()};
+function creditAll(){return sortedGroups([...FLAGS.keys()].filter(g=>planGroup(g))).map(g=>[g,creditItems(g)]).filter(x=>x[1].length)}
+const wkList=ws=>ws.length===1?'неделя '+ws[0]:'недели '+ws.join(', ');
+function creditSel(){
+  const all=ZD.all||[];const gm=$('input[name=zg]:checked').value,wm=$('input[name=zw]:checked').value;
+  const cw=W()&&W().week;
+  const weeks=wm==='sem'?null:wm==='cur'?(cw?[cw]:[]):[...ZD.pick].sort((a,b)=>a-b);
+  let pages=gm==='one'?all.filter(([g])=>g===$('#zdGroup').value):all;
+  if(weeks) pages=pages.map(([g,its])=>[g,its.filter(it=>weeks.includes(it.week))]).filter(x=>x[1].length);
+  return {pages,weeks,gm};
+}
+function creditDlgSum(){
+  const wm=$('input[name=zw]:checked').value;$('#zdWeeks').classList.toggle('off',wm!=='pick');
+  $('#zdGroup').disabled=$('input[name=zg]:checked').value!=='one';
+  const {pages,weeks}=creditSel();const n=pages.reduce((a,[,its])=>a+its.length,0);
+  $('#zdSum').textContent=weeks&&!weeks.length?'Выберите хотя бы одну неделю.':n?`Будет выведено: ${n} ${plural(n,'зачёт','зачёта','зачётов')} · ${pages.length} ${plural(pages.length,'группа','группы','групп')}`:'Под выбранные условия зачётов нет.';
+  $('#zdGo').disabled=!n;
+}
+function openCreditDlg(){
+  ZD.all=creditAll();
+  if(!ZD.all.length) return toast('Нет отмеченных зачётных дисциплин: поставьте флажки в недельном плане.',true);
+  const gs=ZD.all.map(x=>x[0]),cur=st.mode==='group'&&gs.includes(st.key.group)?st.key.group:gs[0];
+  $('#zdGroup').innerHTML=gs.map(g=>`<option${g===cur?' selected':''}>${esc(g)}</option>`).join('');
+  const cnt=new Map();ZD.all.forEach(([,its])=>its.forEach(it=>cnt.set(it.week,(cnt.get(it.week)||0)+1)));
+  const ws=[...cnt.keys()].sort((a,b)=>a-b);ZD.pick=new Set([...ZD.pick].filter(w=>cnt.has(w)));
+  $('#zdWeeks').innerHTML=ws.map(w=>`<label><input type="checkbox" data-zw="${w}"${ZD.pick.has(w)?' checked':''}> ${w} <small>(${cnt.get(w)})</small></label>`).join('');
+  const cw=W()&&W().week;const curR=$('input[name=zw][value=cur]');
+  curR.disabled=!cw;$('#zdCurLabel').textContent=cw?'Текущая неделя ('+cw+')':'Текущая неделя (нет расписания)';
+  if(curR.disabled&&curR.checked) $('input[name=zw][value=sem]').checked=true;
+  creditDlgSum();
+  $('#zdlg').hidden=false;document.body.classList.add('modal-open');$('#zdGo').focus();
+}
+function closeCreditDlg(){$('#zdlg').hidden=true;if($('#modal').hidden) document.body.classList.remove('modal-open')}
+$('#zdlg').addEventListener('change',e=>{
+  const w=e.target.dataset.zw;if(w){e.target.checked?ZD.pick.add(+w):ZD.pick.delete(+w);$('input[name=zw][value=pick]').checked=true}
+  if(e.target.name==='zg') $('#zdBreak').checked=e.target.value==='all'&&$('input[name=zw]:checked').value==='sem';
+  if(e.target.name==='zw') $('#zdBreak').checked=$('input[name=zg]:checked').value==='all'&&e.target.value==='sem';
+  creditDlgSum();
+});
+$('#zdlg').addEventListener('click',e=>{if(e.target.closest('[data-zclose]')) closeCreditDlg()});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#zdlg').hidden) closeCreditDlg()});
+$('#zdGo').addEventListener('click',async()=>{
+  const {pages,weeks,gm}=creditSel();if(!pages.length) return;
+  const brk=$('#zdBreak').checked,period=weeks?'· '+wkList(weeks):'за семестр';
+  closeCreditDlg();const btn=$('#pdfBtn');btn.disabled=true;btn.textContent='Готовлю PDF…';
+  try{
+    const content=pages.flatMap(([g,its],i)=>pdfCreditPage(g,its,brk,period,i===0,i===pages.length-1));
+    const name=`Зачёты — ${gm==='one'?pages[0][0]:'все группы'} — ${weeks?wkList(weeks):'семестр'}.pdf`.replace(/[\\/:*?"<>|]/g,'-');
+    await savePdf(baseDoc(false,content),name);
+  }catch(err){toast(err&&err.message||'Не удалось сформировать PDF.',true)}
+  finally{btn.disabled=false;btn.textContent='PDF ▾'}
+});
 function updatePdfMenu(){
   const w=W(),key=st.key[st.mode];
   const one=$('#pdf-one'),all=$('#pdf-all'),z=$('#pdf-zach');

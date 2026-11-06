@@ -29,7 +29,7 @@
       <div class="pm-list" id="pdfMenu" hidden>
         <button data-pdf="one" id="pdf-one"><b id="pdfOneLabel">Открытое расписание</b><small id="pdfOneSub">текущая неделя</small></button>
         <button data-pdf="all" id="pdf-all"><b>Все группы</b><small id="pdfAllSub">каждая группа на отдельной странице</small></button>
-        <button data-pdf="zach" id="pdf-zach"><b>Зачёты за семестр</b><small>последние пары зачётных дисциплин, группа на странице</small></button>
+        <button data-pdf="zach" id="pdf-zach"><b>Зачёты…</b><small>выбрать группы и недели</small></button>
       </div>
     </div>
   </div>
@@ -58,6 +58,31 @@
       <button class="x" data-close aria-label="Закрыть">×</button>
     </div>
     <div class="modal-b" id="modalBody"></div>
+  </section>
+</div>
+<div class="modal" id="zdlg" hidden>
+  <div class="modal-bg" data-zclose></div>
+  <section class="modal-p zd" role="dialog" aria-modal="true" aria-labelledby="zdTitle">
+    <div class="modal-h">
+      <div><div class="eyebrow">PDF</div><h2 id="zdTitle">Печать зачётов</h2></div>
+      <span class="sp"></span>
+      <button class="x" data-zclose aria-label="Закрыть">×</button>
+    </div>
+    <div class="modal-b">
+      <fieldset class="zf"><legend>Группы</legend>
+        <label><input type="radio" name="zg" value="one" checked> Одна группа <select id="zdGroup" aria-label="Группа"></select></label>
+        <label><input type="radio" name="zg" value="all"> Все группы <small>(по группам)</small></label>
+      </fieldset>
+      <fieldset class="zf"><legend>Недели</legend>
+        <label><input type="radio" name="zw" value="sem" checked> Весь семестр</label>
+        <label><input type="radio" name="zw" value="cur"> <span id="zdCurLabel">Текущая неделя</span></label>
+        <label><input type="radio" name="zw" value="pick"> Выбрать недели</label>
+        <div class="zweeks" id="zdWeeks"></div>
+      </fieldset>
+      <label class="zf-opt"><input type="checkbox" id="zdBreak" checked> Каждая группа с новой страницы</label>
+      <p class="note" id="zdSum"></p>
+      <div class="zd-act"><button class="btn ghost" data-zclose>Отмена</button><button class="btn" id="zdGo">Скачать PDF</button></div>
+    </div>
   </section>
 </div>
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
