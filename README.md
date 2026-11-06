@@ -4,6 +4,11 @@
 преподавателям и аудиториям и сетка расписания. Приложение работает целиком
 в браузере и распространяется как **один HTML-файл** без сервера.
 
+## Открыть онлайн
+
+Сайт: **https://meshcheryakovaa.github.io/edulog/** — обновляется
+автоматически после каждого push в `main`.
+
 ## Скачать
 
 Готовый файл `edulog.html` прикладывается к каждому
@@ -22,7 +27,7 @@ src/
 scripts/
   build.mjs                  сборка в один файл (без зависимостей)
 .github/workflows/
-  release.yml                CI: сборка и публикация релиза
+  release.yml                CI: сборка, GitHub Pages и релизы
 ```
 
 ## Сборка
@@ -50,4 +55,7 @@ git push origin v1.0.0
 
 Workflow `Build & Release` соберёт `edulog.html` и создаст GitHub Release
 с этим файлом. На каждый push в `main` и на pull request файл тоже собирается
-и доступен в артефактах запуска.
+и доступен в артефактах запуска, а push в `main` публикует его на GitHub Pages.
+
+Для работы Pages один раз включите в настройках репозитория
+**Settings → Pages → Build and deployment → Source: GitHub Actions**.
