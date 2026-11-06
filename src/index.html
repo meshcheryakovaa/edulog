@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>План и расписание</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;600&family=Unbounded:wght@500;600&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+
+<header class="top">
+  <p class="brand">План и расписание</p>
+  <div class="seg" role="tablist" aria-label="Что смотреть">
+    <button role="tab" data-view="plan" id="view-plan">Недельный план</button>
+    <button role="tab" data-view="sched" id="view-sched">Расписание</button>
+  </div>
+  <div class="files">
+    <span class="src" id="srcPlan"></span>
+    <span class="src" id="srcSched"></span>
+    <label class="btn" for="file">Открыть файлы…</label>
+    <input type="file" id="file" accept=".txt,.json,text/plain,application/json" multiple>
+    <div class="pmenu">
+      <button class="btn ghost" id="pdfBtn" aria-haspopup="true" aria-expanded="false">PDF ▾</button>
+      <div class="pm-list" id="pdfMenu" hidden>
+        <button data-pdf="one" id="pdf-one"><b id="pdfOneLabel">Открытое расписание</b><small id="pdfOneSub">текущая неделя</small></button>
+        <button data-pdf="all" id="pdf-all"><b>Все группы</b><small id="pdfAllSub">каждая группа на отдельной странице</small></button>
+        <button data-pdf="zach" id="pdf-zach"><b>Зачёты за семестр</b><small>последние пары зачётных дисциплин, группа на странице</small></button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="layout">
+  <aside class="side" aria-label="Указатель">
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" data-mode="group" id="tab-group">Группы</button>
+      <button class="tab" role="tab" data-mode="teacher" id="tab-teacher">Преподаватели</button>
+      <button class="tab" role="tab" data-mode="room" id="tab-room">Аудитории</button>
+    </div>
+    <div class="search"><input id="q" type="search" placeholder="Поиск" autocomplete="off" aria-label="Поиск по списку"></div>
+    <div class="list" id="list"></div>
+  </aside>
+  <main class="main" id="main"></main>
+</div>
+
+<div class="modal" id="modal" hidden>
+  <div class="modal-bg" data-close></div>
+  <section class="modal-p" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-h">
+      <div><div class="eyebrow" id="modalEyebrow"></div><h2 id="modalTitle"></h2></div>
+      <span class="sp"></span>
+      <button class="btn ghost" id="modalOpen">Открыть расписание</button>
+      <button class="x" data-close aria-label="Закрыть">×</button>
+    </div>
+    <div class="modal-b" id="modalBody"></div>
+  </section>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+<div class="drop" id="drop" hidden>Отпустите файлы: план (.txt) и/или расписание (.json)</div>
+
+
+<!-- Встроенные примеры: при сборке содержимое файлов подставляется внутрь тегов -->
+<script type="text/plain" id="samplePlan" src="data/sample-plan.txt"></script>
+<script type="application/json" id="sampleSched" src="data/sample-schedule.json"></script>
+
+<script src="app.js"></script>
+</body>
+</html>
