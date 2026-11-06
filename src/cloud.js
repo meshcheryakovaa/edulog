@@ -113,6 +113,7 @@ async function loadData(){
   if(sd&&sd.ups.length){META.sched=schedMeta(sd.rows,sd.ups);A.loadSchedDB(sd.rows,sd.ups,META.sched)}
   A.setFlags(zs||[]);
   A.refresh();
+  if(!SCHED_DB&&canEdit()) A.toast(SCHEMA_HINT,true);
 }
 // Тихо подтянуть изменения, если кто-то опубликовал новое или поменял зачёты.
 let lastCheck=0;
@@ -123,7 +124,8 @@ async function checkUpdates(){
     const [ds,zs,top]=await Promise.all([
       api('/rest/v1/datasets?select=kind,name,author,updated_at,size'),
       api('/rest/v1/zachety?select=grp,code'),
-      SCHED_DB?api('/rest/v1/sched_uploads?select=id&order=id.desc&limit=1').catch(()=>null):null,
+      // спрашиваем всегда: если таблиц не было, а schema.sql уже выполнили, расписание подтянется без перезагрузки
+      api('/rest/v1/sched_uploads?select=id&order=id.desc&limit=1').then(r=>{SCHED_DB=true;return r},e=>{if(missingTable(e)) SCHED_DB=false;return null}),
     ]);
     let changed=false;
     const schedLocal=A.sched&&A.sched.local;
@@ -145,15 +147,24 @@ async function checkUpdates(){
       if(k==='sched'&&hasDB) continue;
       if(!(ds||[]).some(d=>d.kind===k)){delete META[k];const cur=k==='plan'?A.plan:A.sched;if(cur&&!cur.local){A.clear(k);changed=true}}
     }
-    A.setFlags(zs||[]);
+    if(!flagBusy) A.setFlags(zs||[]);
     if(changed) A.toast('Загружена новая версия опубликованных данных');
     A.refresh();
   }catch(e){}
 }
 document.addEventListener('visibilitychange',()=>{if(!document.hidden) checkUpdates()});
 addEventListener('focus',checkUpdates);
+// и раз в минуту, пока вкладка открыта на экране: чужие публикации и отметки зачётов видны без перезагрузки
+setInterval(()=>{if(!document.hidden) checkUpdates()},60000);
+// неопубликованные загрузки хранятся только в этой вкладке — предупреждаем перед закрытием
+addEventListener('beforeunload',e=>{if(canEdit()&&[A.plan,A.sched].some(o=>o&&o.local)){e.preventDefault();e.returnValue=''}});
 
+let flagBusy=0; // отметки зачётов, ещё не дошедшие до базы: пока они в пути, фоновое обновление их не перезаписывает
 async function saveFlag(groups,code,on){
+  flagBusy++;
+  try{await writeFlag(groups,code,on)}finally{flagBusy--}
+}
+async function writeFlag(groups,code,on){
   if(on) await api('/rest/v1/zachety?on_conflict=grp,code',{method:'POST',headers:{Prefer:'resolution=ignore-duplicates,return=minimal'},body:groups.map(g=>({grp:g,code}))});
   else await Promise.all(groups.map(g=>api('/rest/v1/zachety?grp=eq.'+q(g)+'&code=eq.'+q(code),{method:'DELETE',headers:{Prefer:'return=minimal'}})));
 }
@@ -175,11 +186,16 @@ async function applySchedOp(op){
 }
 async function publishSched(){
   if(!SCHED_DB) throw new Error(SCHEMA_HINT);
-  for(const op of A.schedPending()) await applySchedOp(op);
+  // Загрузки отправляются по одной; отправленная сразу убирается из очереди,
+  // чтобы после сбоя на середине повторная публикация не записала её второй раз.
+  let op;
+  while((op=A.schedPending()[0])){await applySchedOp(op);A.schedSent()}
   // старую запись «расписание одним файлом» больше не используем
   if(META.sched&&META.sched.legacy) await api('/rest/v1/datasets?kind=eq.sched',{method:'DELETE',headers:{Prefer:'return=minimal'}}).catch(()=>{});
+  // после публикации показываем ровно то, что лежит в базе
   const sd=await fetchSched();
   if(sd&&sd.ups.length){META.sched=schedMeta(sd.rows,sd.ups);A.loadSchedDB(sd.rows,sd.ups,META.sched)}
+  else{delete META.sched;A.clear('sched')}
 }
 async function publish(){
   const items=[['plan',A.plan],['sched',A.sched]].filter(([,o])=>o&&o.local);
@@ -421,6 +437,7 @@ function renderAdmin(main){
     const row=(kind,title)=>{const m=META[kind];return `<tr><td>${title}</td>${m?`<td>${esc(m.name)}${m.weeks!=null?`<div class="sub">${m.weeks} нед. в базе</div>`:''}</td><td class="num">${(m.size/1024).toFixed(0)} КБ</td><td>${esc(m.author||'—')}</td><td class="num">${esc(fmt(m.updated_at))}</td><td><button class="btn ghost sm danger" data-unpub="${kind}">Снять с публикации</button></td>`:'<td colspan="5" class="sub">не опубликовано</td>'}</tr>`};
     body=`<section class="panel"><h2>Опубликованные файлы</h2><div class="tbl-wrap"><table class="adm"><thead><tr><th></th><th>Файл</th><th>Размер</th><th>Опубликовал(а)</th><th>Когда</th><th></th></tr></thead><tbody>
       ${row('plan','План')}${row('sched','Расписание')}</tbody></table></div>
+      ${SCHED_DB?'':`<p class="note err">${esc(SCHEMA_HINT)}</p>`}
       <p class="note">Новую версию публикует редактор или администратор: «Открыть файлы…» в шапке, затем «Опубликовать». Все пользователи увидят её при следующем открытии вкладки.</p></section>`;
   }else{
     body=`<section class="panel"><h2>Журнал действий <span class="legend">последние ${ADM.log.length}</span></h2>`+
