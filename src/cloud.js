@@ -8,7 +8,8 @@ const A=window.EduLOG;
 if(!A||!A.CLOUD) return;
 const $=s=>document.querySelector(s);
 const esc=A.esc;
-const BASE=A.CFG.supabaseUrl.replace(/\/+$/,'');
+// Допускается полный адрес (https://<ref>.supabase.co) или только идентификатор проекта.
+const BASE=(u=>/^[a-z0-9]{10,40}$/i.test(u)?`https://${u}.supabase.co`:/^[a-z]+:\/\//i.test(u)?u:'https://'+u)(A.CFG.supabaseUrl.trim()).replace(/\/+$/,'');
 const KEY=A.CFG.supabaseAnonKey;
 const SKEY='edulog-auth';
 
