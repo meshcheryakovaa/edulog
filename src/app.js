@@ -1072,6 +1072,12 @@ window.EduLOG={
     if(SCHED.legacy) ops.unshift({file:SCHED.legacyName||'',put:[...SCHED.legacyStore.values()],del:[],migrate:true});
     return ops;
   },
+  // первая загрузка из schedPending() записана в базу — убрать её из очереди
+  schedSent(){
+    if(!SCHED) return;
+    if(SCHED.legacy){SCHED.legacy=false;SCHED.legacyStore=null}
+    else SCHED.pending.shift();
+  },
   computeUpload,
   setFlags(rows){FLAGS=new Map();for(const r of rows){let s=FLAGS.get(r.grp);if(!s){s=new Set();FLAGS.set(r.grp,s)}s.add(r.code)}FVER++},
   setCanFlag(v){CAN_FLAG=!!v},
