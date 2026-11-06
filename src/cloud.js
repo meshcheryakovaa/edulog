@@ -80,17 +80,37 @@ const q=v=>encodeURIComponent(v);
 const redirectTo=()=>location.href.split('#')[0];
 
 /* ---------- Данные ---------- */
-let META={};     // kind -> {name, updated_at, author, size}
+let META={};     // kind -> {name, updated_at, author, size}; для расписания ещё ver (номер последней загрузки) и weeks
+let SCHED_DB=true; // false — в базе ещё нет таблиц sched_weeks / sched_uploads (не выполнена новая версия schema.sql)
+const SCHEMA_HINT='В базе нет таблиц расписания по неделям: администратору нужно ещё раз выполнить supabase/schema.sql в Supabase → SQL Editor.';
+const missingTable=e=>e&&(e.status===404||/PGRST205|does not exist|schema cache/i.test((e.body&&(e.body.code+' '+e.body.message))||e.message||''));
+async function fetchSched(){
+  try{
+    const [rows,ups]=await Promise.all([
+      api('/rest/v1/sched_weeks?select=wkey,content'),
+      api('/rest/v1/sched_uploads?select=id,at,author,file,summary&order=id.desc&limit=60'),
+    ]);
+    SCHED_DB=true;return {rows:rows||[],ups:ups||[]};
+  }catch(e){if(missingTable(e)){SCHED_DB=false;return null}throw e}
+}
+function schedMeta(rows,ups){
+  const u=ups[0];
+  return {name:(ups.find(x=>x.file)||{}).file||'',updated_at:u.at,author:u.author,ver:u.id,weeks:rows.length,size:rows.reduce((a,r)=>a+(r.content||'').length,0)};
+}
 async function loadData(){
-  const [ds,zs]=await Promise.all([
+  const [ds,zs,sd]=await Promise.all([
     api('/rest/v1/datasets?select=kind,name,content,author,updated_at,size'),
     api('/rest/v1/zachety?select=grp,code'),
+    fetchSched(),
   ]);
   A.clear();META={};
   for(const d of ds||[]){
-    META[d.kind]={name:d.name,updated_at:d.updated_at,author:d.author,size:d.size};
+    META[d.kind]={name:d.name,updated_at:d.updated_at,author:d.author,size:d.size,legacy:d.kind==='sched'};
     try{A.load(d.kind,d.content,d.name,META[d.kind])}catch(e){A.toast(e.message,true)}
   }
+  // Расписание по неделям: если загрузки уже были, база — таблица sched_weeks,
+  // иначе — расписание, опубликованное раньше одним файлом (перенесётся при первой публикации).
+  if(sd&&sd.ups.length){META.sched=schedMeta(sd.rows,sd.ups);A.loadSchedDB(sd.rows,sd.ups,META.sched)}
   A.setFlags(zs||[]);
   A.refresh();
 }
@@ -100,16 +120,31 @@ async function checkUpdates(){
   if(!canRead()||Date.now()-lastCheck<15000) return;
   lastCheck=Date.now();
   try{
-    const [ds,zs]=await Promise.all([api('/rest/v1/datasets?select=kind,name,author,updated_at,size'),api('/rest/v1/zachety?select=grp,code')]);
+    const [ds,zs,top]=await Promise.all([
+      api('/rest/v1/datasets?select=kind,name,author,updated_at,size'),
+      api('/rest/v1/zachety?select=grp,code'),
+      SCHED_DB?api('/rest/v1/sched_uploads?select=id&order=id.desc&limit=1').catch(()=>null):null,
+    ]);
     let changed=false;
+    const schedLocal=A.sched&&A.sched.local;
+    const ver=top&&top[0]?top[0].id:null;
+    if(ver!=null&&!(META.sched&&META.sched.ver===ver)&&!schedLocal){
+      const sd=await fetchSched();
+      if(sd&&sd.ups.length){META.sched=schedMeta(sd.rows,sd.ups);A.loadSchedDB(sd.rows,sd.ups,META.sched);changed=true}
+    }
+    const hasDB=!!(META.sched&&META.sched.ver!=null);
     for(const d of ds||[]){
+      if(d.kind==='sched'&&hasDB) continue;
       const m=META[d.kind];const cur=d.kind==='plan'?A.plan:A.sched;
       if((!m||m.updated_at!==d.updated_at)&&!(cur&&cur.local)){
         const full=await api('/rest/v1/datasets?select=content&kind=eq.'+q(d.kind));
-        if(full&&full[0]){META[d.kind]={name:d.name,updated_at:d.updated_at,author:d.author,size:d.size};A.load(d.kind,full[0].content,d.name,META[d.kind]);changed=true}
+        if(full&&full[0]){META[d.kind]={name:d.name,updated_at:d.updated_at,author:d.author,size:d.size,legacy:d.kind==='sched'};A.load(d.kind,full[0].content,d.name,META[d.kind]);changed=true}
       }
     }
-    for(const k of Object.keys(META)) if(!(ds||[]).some(d=>d.kind===k)){delete META[k];const cur=k==='plan'?A.plan:A.sched;if(cur&&!cur.local){A.clear(k);changed=true}}
+    for(const k of Object.keys(META)){
+      if(k==='sched'&&hasDB) continue;
+      if(!(ds||[]).some(d=>d.kind===k)){delete META[k];const cur=k==='plan'?A.plan:A.sched;if(cur&&!cur.local){A.clear(k);changed=true}}
+    }
     A.setFlags(zs||[]);
     if(changed) A.toast('Загружена новая версия опубликованных данных');
     A.refresh();
@@ -122,19 +157,44 @@ async function saveFlag(groups,code,on){
   if(on) await api('/rest/v1/zachety?on_conflict=grp,code',{method:'POST',headers:{Prefer:'resolution=ignore-duplicates,return=minimal'},body:groups.map(g=>({grp:g,code}))});
   else await Promise.all(groups.map(g=>api('/rest/v1/zachety?grp=eq.'+q(g)+'&code=eq.'+q(code),{method:'DELETE',headers:{Prefer:'return=minimal'}})));
 }
+/* Одна загрузка расписания: недели сравниваются с тем, что сейчас в базе на сервере
+   (а не с тем, что было открыто), поэтому журнал верен, даже если кто-то успел опубликовать раньше. */
+const inList=keys=>'('+keys.map(k=>'"'+String(k).replace(/["\\]/g,'')+'"').join(',')+')';
+async function applySchedOp(op){
+  const keys=[...op.put.map(w=>w.k),...op.del];
+  const rows=keys.length?await api('/rest/v1/sched_weeks?select=wkey,content&wkey=in.'+q(inList(keys))):[];
+  const base=new Map();for(const r of rows||[]){try{const c=JSON.parse(r.content);c.k=r.wkey;base.set(r.wkey,c)}catch(e){}}
+  const {entry}=A.computeUpload(base,op);
+  if(!entry.weeks.length) return;
+  await api('/rest/v1/rpc/sched_apply',{method:'POST',body:{
+    p_file:op.file||'',
+    p_put:op.put.map(w=>({wkey:w.k,week:w.week,date_start:w.start,date_end:w.end,lessons:w.l.length,content:JSON.stringify(w)})),
+    p_del:op.del,
+    p_summary:{weeks:entry.weeks,ch:entry.ch,migrate:!!op.migrate},
+  }});
+}
+async function publishSched(){
+  if(!SCHED_DB) throw new Error(SCHEMA_HINT);
+  for(const op of A.schedPending()) await applySchedOp(op);
+  // старую запись «расписание одним файлом» больше не используем
+  if(META.sched&&META.sched.legacy) await api('/rest/v1/datasets?kind=eq.sched',{method:'DELETE',headers:{Prefer:'return=minimal'}}).catch(()=>{});
+  const sd=await fetchSched();
+  if(sd&&sd.ups.length){META.sched=schedMeta(sd.rows,sd.ups);A.loadSchedDB(sd.rows,sd.ups,META.sched)}
+}
 async function publish(){
   const items=[['plan',A.plan],['sched',A.sched]].filter(([,o])=>o&&o.local);
   if(!items.length) return;
   const btn=$('#pubBtn');btn.disabled=true;btn.textContent='Публикую…';
   try{
     for(const [kind,o] of items){
+      if(kind==='sched'){await publishSched();continue}
       const rows=await api('/rest/v1/datasets',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=representation'},
         body:{kind,name:o.file||o.name,content:o.raw}});
       const r=rows&&rows[0]||{};
       META[kind]={name:r.name,updated_at:r.updated_at,author:r.author,size:r.size};
       A.markPublished(kind,META[kind]);
     }
-    A.toast(items.length>1?'План и расписание опубликованы для всех':(items[0][0]==='plan'?'План опубликован для всех':'Расписание опубликовано для всех'));
+    A.toast(items.length>1?'План и расписание опубликованы для всех':(items[0][0]==='plan'?'План опубликован для всех':'Изменения расписания опубликованы для всех'));
   }catch(e){A.toast(e.message,true)}
   finally{btn.disabled=false;btn.textContent='Опубликовать';A.refresh()}
 }
@@ -308,12 +368,17 @@ let ADM={users:[],log:[],tab:'users',loading:false,err:''};
 const ACT={
   'dataset.publish':d=>`опубликовал(а) ${d.kind==='plan'?'план':'расписание'} «${d.name}»`,
   'dataset.delete':d=>`снял(а) с публикации ${d.kind==='plan'?'план':'расписание'} «${d.name}»`,
+  'sched.upload':d=>d.file?`загрузил(а) расписание «${d.file}»: ${schedWeeksText(d.weeks||[])}`:`удалил(а) из расписания ${schedWeeksText(d.weeks||[])}`,
   'zachet.on':d=>`отметил(а) зачёт ${d.code} у группы ${d.group}`,
   'zachet.off':d=>`снял(а) зачёт ${d.code} у группы ${d.group}`,
   'user.register':d=>`регистрация ${d.email}${d.role==='admin'?' (первый пользователь — администратор)':''}`,
   'user.role':d=>`${d.email}: ${ROLES[d.from]||d.from} → ${ROLES[d.to]||d.to}`,
   'user.delete':d=>`удалён пользователь ${d.email}`,
 };
+function schedWeeksText(ws){
+  const T={new:'новая',upd:'обновлена',same:'без изменений',del:'удалена'};
+  return ws.map(w=>`нед. ${w.week||w.k} — ${T[w.st]||w.st}`).join(', ')||'без изменений';
+}
 async function loadAdmin(){
   ADM.loading=true;ADM.err='';
   try{
@@ -353,7 +418,7 @@ function renderAdmin(main){
       `</tbody></table></div>
       <p class="note">${Object.keys(ROLES).map(r=>`<b>${ROLES[r]}</b> — ${ROLE_HINT[r]}`).join('; ')}. Чтобы удалить аккаунт полностью, используйте Supabase → Authentication → Users.</p></section>`;
   }else if(ADM.tab==='data'){
-    const row=(kind,title)=>{const m=META[kind];return `<tr><td>${title}</td>${m?`<td>${esc(m.name)}</td><td class="num">${(m.size/1024).toFixed(0)} КБ</td><td>${esc(m.author||'—')}</td><td class="num">${esc(fmt(m.updated_at))}</td><td><button class="btn ghost sm danger" data-unpub="${kind}">Снять с публикации</button></td>`:'<td colspan="5" class="sub">не опубликовано</td>'}</tr>`};
+    const row=(kind,title)=>{const m=META[kind];return `<tr><td>${title}</td>${m?`<td>${esc(m.name)}${m.weeks!=null?`<div class="sub">${m.weeks} нед. в базе</div>`:''}</td><td class="num">${(m.size/1024).toFixed(0)} КБ</td><td>${esc(m.author||'—')}</td><td class="num">${esc(fmt(m.updated_at))}</td><td><button class="btn ghost sm danger" data-unpub="${kind}">Снять с публикации</button></td>`:'<td colspan="5" class="sub">не опубликовано</td>'}</tr>`};
     body=`<section class="panel"><h2>Опубликованные файлы</h2><div class="tbl-wrap"><table class="adm"><thead><tr><th></th><th>Файл</th><th>Размер</th><th>Опубликовал(а)</th><th>Когда</th><th></th></tr></thead><tbody>
       ${row('plan','План')}${row('sched','Расписание')}</tbody></table></div>
       <p class="note">Новую версию публикует редактор или администратор: «Открыть файлы…» в шапке, затем «Опубликовать». Все пользователи увидят её при следующем открытии вкладки.</p></section>`;
@@ -387,7 +452,14 @@ document.addEventListener('click',async e=>{
   if(up){
     const kind=up.dataset.unpub;
     if(up.dataset.sure!=='1'){up.dataset.sure='1';up.textContent='Точно снять?';setTimeout(()=>{if(up.isConnected){up.dataset.sure='';up.textContent='Снять с публикации'}},4000);return}
-    try{await api('/rest/v1/datasets?kind=eq.'+q(kind),{method:'DELETE',headers:{Prefer:'return=minimal'}});A.toast('Снято с публикации');await loadData()}catch(err){A.toast(err.message,true)}
+    try{
+      if(kind==='sched'&&META.sched&&META.sched.ver!=null){
+        const ks=await api('/rest/v1/sched_weeks?select=wkey,week,date_start,date_end,lessons');
+        await api('/rest/v1/rpc/sched_apply',{method:'POST',body:{p_file:'',p_put:[],p_del:(ks||[]).map(r=>r.wkey),
+          p_summary:{weeks:(ks||[]).map(r=>({k:r.wkey,week:r.week,start:r.date_start,end:r.date_end,st:'del',n:r.lessons})),ch:{}}}});
+      }
+      await api('/rest/v1/datasets?kind=eq.'+q(kind),{method:'DELETE',headers:{Prefer:'return=minimal'}});
+      A.toast('Снято с публикации');await loadData()}catch(err){A.toast(err.message,true)}
     await loadAdmin();A.setView('admin');
   }
 });

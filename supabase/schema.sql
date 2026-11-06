@@ -157,6 +157,78 @@ create policy zachety_update on public.zachety for update to authenticated
 drop policy if exists zachety_delete on public.zachety;
 create policy zachety_delete on public.zachety for delete to authenticated using (public.can_edit());
 
+-- ---------- Расписание по неделям ----------
+-- Файл расписания содержит одну или несколько целых недель. Загрузка заменяет в базе
+-- только эти недели (sched_weeks), остальные остаются. Каждая загрузка записывается
+-- в sched_uploads вместе со сводкой «что изменилось» (summary), её показывает приложение.
+-- Ключ недели wkey — дата понедельника (ГГГГ-ММ-ДД) или «n<номер>», если дат нет.
+create table if not exists public.sched_weeks (
+  wkey        text primary key,
+  week        integer,
+  date_start  text not null default '',
+  date_end    text not null default '',
+  lessons     integer not null default 0,
+  content     text not null,
+  upload_id   bigint,
+  updated_at  timestamptz not null default now()
+);
+create table if not exists public.sched_uploads (
+  id          bigint generated always as identity primary key,
+  at          timestamptz not null default now(),
+  user_id     uuid default auth.uid(),
+  author      text not null default '',
+  file        text not null default '',
+  summary     jsonb not null default '{}'::jsonb
+);
+create index if not exists sched_uploads_at on public.sched_uploads (id desc);
+
+alter table public.sched_weeks enable row level security;
+alter table public.sched_uploads enable row level security;
+drop policy if exists sched_weeks_select on public.sched_weeks;
+create policy sched_weeks_select on public.sched_weeks for select to authenticated using (public.can_read());
+drop policy if exists sched_weeks_insert on public.sched_weeks;
+create policy sched_weeks_insert on public.sched_weeks for insert to authenticated with check (public.can_edit());
+drop policy if exists sched_weeks_update on public.sched_weeks;
+create policy sched_weeks_update on public.sched_weeks for update to authenticated
+  using (public.can_edit()) with check (public.can_edit());
+drop policy if exists sched_weeks_delete on public.sched_weeks;
+create policy sched_weeks_delete on public.sched_weeks for delete to authenticated using (public.can_edit());
+drop policy if exists sched_uploads_select on public.sched_uploads;
+create policy sched_uploads_select on public.sched_uploads for select to authenticated using (public.can_read());
+drop policy if exists sched_uploads_insert on public.sched_uploads;
+create policy sched_uploads_insert on public.sched_uploads for insert to authenticated with check (public.can_edit());
+-- Журнал загрузок не правится и не удаляется через API.
+
+-- Одна загрузка целиком в одной транзакции: запись в журнал, удаление и замена недель.
+create or replace function public.sched_apply(p_file text, p_put jsonb, p_del text[], p_summary jsonb)
+returns bigint language plpgsql security invoker set search_path = public as $$
+declare
+  up_id bigint; w jsonb;
+begin
+  if not public.can_edit() then
+    raise exception 'permission denied: недостаточно прав для публикации расписания';
+  end if;
+  insert into public.sched_uploads (user_id, author, file, summary)
+  values (auth.uid(),
+          coalesce((select coalesce(nullif(full_name, ''), email) from public.profiles where id = auth.uid()), ''),
+          coalesce(p_file, ''), coalesce(p_summary, '{}'::jsonb))
+  returning id into up_id;
+  if p_del is not null and array_length(p_del, 1) > 0 then
+    delete from public.sched_weeks where wkey = any(p_del);
+  end if;
+  for w in select * from jsonb_array_elements(coalesce(p_put, '[]'::jsonb)) loop
+    insert into public.sched_weeks (wkey, week, date_start, date_end, lessons, content, upload_id, updated_at)
+    values (w->>'wkey', (w->>'week')::integer, coalesce(w->>'date_start', ''), coalesce(w->>'date_end', ''),
+            coalesce((w->>'lessons')::integer, 0), w->>'content', up_id, now())
+    on conflict (wkey) do update set
+      week = excluded.week, date_start = excluded.date_start, date_end = excluded.date_end,
+      lessons = excluded.lessons, content = excluded.content, upload_id = excluded.upload_id, updated_at = now();
+  end loop;
+  return up_id;
+end $$;
+revoke all on function public.sched_apply(text, jsonb, text[], jsonb) from public, anon;
+grant execute on function public.sched_apply(text, jsonb, text[], jsonb) to authenticated;
+
 -- ---------- Журнал действий (видит только администратор) ----------
 create table if not exists public.audit_log (
   id          bigint generated always as identity primary key,
@@ -182,6 +254,11 @@ begin
     if tg_op = 'DELETE' then act := 'dataset.delete'; det := jsonb_build_object('kind', old.kind, 'name', old.name);
     else act := 'dataset.publish'; det := jsonb_build_object('kind', new.kind, 'name', new.name, 'size', octet_length(new.content));
     end if;
+  elsif tg_table_name = 'sched_uploads' then
+    act := 'sched.upload';
+    det := jsonb_build_object('file', new.file, 'weeks',
+      coalesce((select jsonb_agg(jsonb_build_object('k', x->>'k', 'week', x->'week', 'st', x->>'st'))
+                from jsonb_array_elements(coalesce(new.summary->'weeks', '[]'::jsonb)) x), '[]'::jsonb));
   elsif tg_table_name = 'zachety' then
     if tg_op = 'DELETE' then act := 'zachet.off'; det := jsonb_build_object('group', old.grp, 'code', old.code);
     else act := 'zachet.on'; det := jsonb_build_object('group', new.grp, 'code', new.code);
@@ -203,6 +280,9 @@ end $$;
 drop trigger if exists datasets_audit on public.datasets;
 create trigger datasets_audit after insert or update or delete on public.datasets
   for each row execute function public.audit();
+drop trigger if exists sched_uploads_audit on public.sched_uploads;
+create trigger sched_uploads_audit after insert on public.sched_uploads
+  for each row execute function public.audit();
 drop trigger if exists zachety_audit on public.zachety;
 create trigger zachety_audit after insert or delete on public.zachety
   for each row execute function public.audit();
@@ -215,5 +295,7 @@ grant usage on schema public to anon, authenticated;
 grant select, update on public.profiles to authenticated;
 grant select, insert, update, delete on public.datasets to authenticated;
 grant select, insert, update, delete on public.zachety to authenticated;
+grant select, insert, update, delete on public.sched_weeks to authenticated;
+grant select, insert on public.sched_uploads to authenticated;
 grant select on public.audit_log to authenticated;
-revoke all on public.profiles, public.datasets, public.zachety, public.audit_log from anon;
+revoke all on public.profiles, public.datasets, public.zachety, public.audit_log, public.sched_weeks, public.sched_uploads from anon;

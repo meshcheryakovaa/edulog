@@ -287,3 +287,62 @@ table.adm tr.off td{color:var(--muted)}
   table.adm .opt{display:none}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
+
+/* ---------- Изменения расписания ---------- */
+:root{--add:#2c7349;--add-bg:#dff0e5;--del:#a83232;--del-bg:#f8e1e1;--chg:#7a4fb0;--chg-bg:#ece4f6}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--add:#71c393;--add-bg:#16301f;--del:#ec8a8a;--del-bg:#3d1c1c;--chg:#c3a3ec;--chg-bg:#2d2340}}
+:root[data-theme="dark"]{--add:#71c393;--add-bg:#16301f;--del:#ec8a8a;--del-bg:#3d1c1c;--chg:#c3a3ec;--chg-bg:#2d2340}
+.ck{display:inline-block;font-size:11px;font-weight:600;padding:1px 7px;border-radius:999px;white-space:nowrap}
+.ck.add{background:var(--add-bg);color:var(--add)}
+.ck.del{background:var(--del-bg);color:var(--del)}
+.ck.chg{background:var(--chg-bg);color:var(--chg)}
+.cks{display:inline-flex;flex-wrap:wrap;gap:6px}
+.panel h2 .link.sm{margin-left:auto;font-weight:400}
+.chg-t td{vertical-align:top}
+.chg-t .when{white-space:nowrap;font-family:var(--f-mono);font-size:12px}
+.chg-t .what{min-width:240px}
+.chg-t .what .ck{margin-bottom:4px}
+.chg-t .ci{display:flex;flex-direction:column;line-height:1.3}
+.chg-t .ci+.ci{margin-top:4px}
+.chg-t .ci small{color:var(--muted);font-size:12px}
+.chg-t .ci.was{color:var(--muted);text-decoration:line-through;text-decoration-color:color-mix(in srgb,var(--muted) 60%,transparent)}
+.chg-t .ci .df{background:var(--chg-bg);color:var(--ink);border-radius:3px;padding:0 2px}
+.chg-t .ci.was .df{background:none;color:var(--del)}
+.chg-t .arrow-d{color:var(--muted);font-size:11px;margin:2px 0}
+.chg-t .up{font-size:12px;max-width:220px;overflow-wrap:anywhere}
+.chg-t .up small{display:block;color:var(--muted)}
+.chg-t tr.k-add td:first-child{box-shadow:inset 3px 0 0 var(--add)}
+.chg-t tr.k-del td:first-child{box-shadow:inset 3px 0 0 var(--del)}
+.chg-t tr.k-chg td:first-child{box-shadow:inset 3px 0 0 var(--chg)}
+details.more{margin-top:8px}
+details.more summary{cursor:pointer;font-size:13px;color:var(--accent)}
+details.upl{padding:0}
+details.upl>summary{cursor:pointer;list-style:none;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;padding:12px 16px}
+details.upl>summary::-webkit-details-marker{display:none}
+details.upl>summary::before{content:'▸';color:var(--muted);transition:transform .15s}
+details.upl[open]>summary::before{transform:rotate(90deg)}
+details.upl>:not(summary){margin-left:16px;margin-right:16px}
+details.upl>:last-child{margin-bottom:14px}
+details.upl h3{font-size:13px;font-weight:600;margin:12px 0 6px;display:flex;flex-wrap:wrap;gap:8px;align-items:baseline}
+details.upl h3 small{font-weight:400;color:var(--muted);font-family:var(--f-mono)}
+.up-t{display:flex;flex-direction:column;min-width:0}
+.up-t b{overflow-wrap:anywhere}
+.up-t small{font-size:12px;color:var(--muted)}
+.wchips{display:flex;flex-wrap:wrap;gap:6px}
+.wchip{font-size:12px;padding:2px 8px;border-radius:5px;background:var(--sunk);box-shadow:inset 0 0 0 1px var(--rule);white-space:nowrap}
+.wchip.s-new{background:var(--add-bg);color:var(--add);box-shadow:none}
+.wchip.s-upd{background:var(--chg-bg);color:var(--chg);box-shadow:none}
+.wchip.s-del{background:var(--del-bg);color:var(--del);box-shadow:none}
+.link.danger{color:var(--bad)}
+.stat.acc dd{color:var(--chg)}
+.chm{font-size:10px;font-weight:600;padding:0 5px;border-radius:999px;background:var(--chg-bg);color:var(--chg);flex:none}
+th.w.chg{position:relative;color:var(--chg)}
+th.w.chg::after{content:'';position:absolute;left:50%;bottom:2px;width:5px;height:5px;margin-left:-2.5px;border-radius:50%;background:var(--chg)}
+.ctag{display:inline-block;align-self:flex-start;font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;border-radius:3px;padding:1px 6px;color:var(--surface)}
+.ctag.add{background:var(--add)}
+.ctag.chg{background:var(--chg)}
+.ctag.del{background:var(--del)}
+.ls.ch-add{box-shadow:inset 0 0 0 1.5px var(--add)}
+.ls.ch-chg{box-shadow:inset 0 0 0 1.5px var(--chg)}
+.ls.gone{background:transparent;border:1px dashed var(--del);opacity:.85}
+.ls.gone .ls-s{text-decoration:line-through;color:var(--muted)}
