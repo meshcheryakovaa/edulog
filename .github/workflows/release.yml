@@ -23,6 +23,9 @@ jobs:
           node-version: 22
 
       - name: Build single-file HTML
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
         run: node scripts/build.mjs --out dist/edulog.html --version "${GITHUB_REF_NAME}"
 
       - name: Upload build artifact

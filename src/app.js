@@ -1,5 +1,9 @@
 (function(){
 'use strict';
+// Облачный режим включается, если в config.js заданы адрес и ключ Supabase (см. cloud.js).
+const CFG=window.EDULOG_CONFIG||{};
+const CLOUD=!!(CFG.supabaseUrl&&CFG.supabaseAnonKey);
+let CAN_FLAG=!CLOUD;
 const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const plural=(n,a,b,c)=>{const m=n%10,h=n%100;return m===1&&h!==11?a:(m>=2&&m<=4&&(h<10||h>=20)?b:c)};
@@ -226,9 +230,17 @@ let FLAGS=new Map(),FVER=0;
 const isZ=(g,code)=>!!(FLAGS.get(g)&&FLAGS.get(g).has(code));
 function loadLocalFlags(){try{const o=JSON.parse(localStorage.getItem('plan-zachety')||'{}');FLAGS=new Map(Object.entries(o).filter(([,a])=>Array.isArray(a)).map(([g,a])=>[g,new Set(a)]))}catch(e){}FVER++}
 function saveLocalFlags(){try{localStorage.setItem('plan-zachety',JSON.stringify(Object.fromEntries([...FLAGS].map(([g,s])=>[g,[...s]]))))}catch(e){}}
-function setFlag(groups,code,on){
+function applyFlag(groups,code,on){
   for(const g of groups){let s=FLAGS.get(g);if(!s){s=new Set();FLAGS.set(g,s)}on?s.add(code):s.delete(code);if(!s.size) FLAGS.delete(g)}
-  FVER++;saveLocalFlags();render();
+  FVER++;
+}
+function setFlag(groups,code,on){
+  if(CLOUD&&!CAN_FLAG){render();return}
+  applyFlag(groups,code,on);render();
+  if(!CLOUD){saveLocalFlags();return}
+  Promise.resolve(window.EduLOGCloud&&window.EduLOGCloud.saveFlag(groups,code,on)).catch(e=>{
+    applyFlag(groups,code,!on);render();toast(e&&e.message||'Не удалось сохранить отметку.',true);
+  });
 }
 function fmtFull(d){return String(d.getDate()).padStart(2,'0')+'.'+String(d.getMonth()+1).padStart(2,'0')+'.'+d.getFullYear()}
 /* даты недели плана n: из расписания этой недели либо отсчётом от загруженной */
@@ -371,7 +383,7 @@ function renderPlan(key){
     const svc=/экзамен|консультац|\.ЭК\b|Квалификац/i.test(r.disc);const tags=[];
     const zc=codeOf(r.disc),zok=!kindOf(r.disc),zon=zok&&r.groups.every(g=>isZ(g,zc));
     let zl=-1;if(zon){r.weeks.forEach((v,i)=>{if(v) zl=i});if(zl+1<bucketLast(r.groups[0],zc,preOf(r.disc))) zl=-1}
-    const cb=zok?`<input type="checkbox" class="zcb" data-zg="${esc(r.groups.join('\n'))}" data-zc="${esc(zc)}" title="Зачётная дисциплина" aria-label="Зачёт: ${esc(r.disc)}"${zon?' checked':''}>`:'<span class="zcb-sp"></span>';
+    const cb=zok?`<input type="checkbox" class="zcb" data-zg="${esc(r.groups.join('\n'))}" data-zc="${esc(zc)}" title="${CAN_FLAG?'Зачётная дисциплина':'Зачётная дисциплина (менять может редактор)'}" aria-label="Зачёт: ${esc(r.disc)}"${zon?' checked':''}${CAN_FLAG?'':' disabled'}>`:'<span class="zcb-sp"></span>';
     if(r.sub) tags.push(`<span class="tag${r.sub==='Поток'?' acc':''}">${esc(r.sub)}</span>`);
     if(r.kak) tags.push(`<span class="tag" title="Практика блоками">${esc(r.kak)}</span>`);
     const grp=mode!=='group'?`<div class="d-grp">${r.groups.map(n=>`<button class="link" data-go="group" data-key="${esc(n)}">${esc(n)}</button>`).join(', ')}</div>`:'';
@@ -511,6 +523,11 @@ function closePreview(){$('#modal').hidden=true;document.body.classList.remove('
 /* ---------- Отрисовка ---------- */
 function render(){
   renderTabs();
+  document.body.classList.toggle('v-admin',st.view==='admin');
+  if(st.view==='admin'){
+    if(window.EduLOGCloud&&window.EduLOGCloud.isAdmin()){window.EduLOGCloud.renderAdmin($('#main'));save();return}
+    st.view='plan';renderTabs();document.body.classList.remove('v-admin');
+  }
   LIST=(PLAN||SCHED)?items(st.mode):[];
   const key=LIST.length?resolveKey(LIST):null;
   renderList();
@@ -519,11 +536,14 @@ function render(){
 }
 function renderSources(){
   const sp=$('#srcPlan'),ss=$('#srcSched');
-  if(PLAN){sp.className='src';sp.innerHTML=`<span class="k">План</span><b>${esc(PLAN.name)}</b>${PLAN.sample?' (пример)':''} · ${PLAN.groups.length} ${plural(PLAN.groups.length,'группа','группы','групп')}`}
+  const tag=o=>o.sample?' (пример)':o.local&&CLOUD?' <span class="pill warn" title="Файл открыт только у вас">не опубликован</span>':o.meta?` <span class="by" title="Опубликовал(а): ${esc(o.meta.author||'—')}">${esc(fmtStamp(o.meta.updated_at))}</span>`:'';
+  if(PLAN){sp.className='src';sp.innerHTML=`<span class="k">План</span><b>${esc(PLAN.name)}</b>${tag(PLAN)} · ${PLAN.groups.length} ${plural(PLAN.groups.length,'группа','группы','групп')}`}
   else{sp.className='src none';sp.innerHTML='<span class="k">План</span><b>не загружен</b>'}
-  if(SCHED){const n=SCHED.weeks.length;ss.className='src';ss.innerHTML=`<span class="k">Расписание</span><b>${esc(SCHED.name)}</b>${SCHED.sample?' (пример)':''} · ${n} ${plural(n,'неделя','недели','недель')}`}
+  if(SCHED){const n=SCHED.weeks.length;ss.className='src';ss.innerHTML=`<span class="k">Расписание</span><b>${esc(SCHED.name)}</b>${tag(SCHED)} · ${n} ${plural(n,'неделя','недели','недель')}`}
   else{ss.className='src none';ss.innerHTML='<span class="k">Расписание</span><b>не загружено</b>'}
+  if(window.EduLOGCloud) window.EduLOGCloud.onSources();
 }
+function fmtStamp(iso){const d=new Date(iso);if(isNaN(d)) return '';return fmtFull(d)+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')}
 let toastT;
 function toast(m,err){const t=$('#toast');t.textContent=m;t.className='toast'+(err?' err':'');t.hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>t.hidden=true,4000)}
 
@@ -535,19 +555,19 @@ function decode(buf){
   const a=new TextDecoder('windows-1251').decode(u8);let b='';try{b=new TextDecoder('ibm866').decode(u8)}catch(e){}
   return score(b)>score(a)?b:a;
 }
-function ingest(text,name,sample){
+function ingest(text,name,sample,extra){
   text=text.replace(/^﻿/,'');
   if(/^\s*[\[{]/.test(text)){
     let obj;try{obj=JSON.parse(text)}catch(e){throw new Error(`«${name}»: не удалось разобрать JSON.`)}
-    SCHED={name:name.replace(/\.json$/i,''),weeks:parseSched(obj),sample};st.wi=0;FVER++;return 'sched';
+    SCHED=Object.assign({name:name.replace(/\.json$/i,''),file:name,weeks:parseSched(obj),sample,raw:text},extra);st.wi=0;FVER++;return 'sched';
   }
   const groups=parsePlan(text);
   if(!groups.length) throw new Error(`«${name}»: не найдено ни одной группы плана.`);
-  PLAN={name,groups,sample};FVER++;return 'plan';
+  PLAN=Object.assign({name,file:name,groups,sample,raw:text},extra);FVER++;return 'plan';
 }
 async function openFiles(files){
   const done=[];let last=null;
-  for(const f of files){try{last=ingest(decode(await f.arrayBuffer()),f.name,false);done.push(f.name)}catch(e){toast(e.message||'Не удалось открыть файл.',true)}}
+  for(const f of files){try{last=ingest(decode(await f.arrayBuffer()),f.name,false,{local:true});done.push(f.name)}catch(e){toast(e.message||'Не удалось открыть файл.',true)}}
   if(!done.length) return;
   buildRegistry();if(last) st.view=last;closePreview();render();
   toast(done.length>1?`Открыты файлы: ${done.join(', ')}`:`Открыт файл «${done[0]}»`);
@@ -715,7 +735,24 @@ $('#pdfMenu').addEventListener('click',async e=>{
 });
 
 /* ---------- Встроенные примеры ---------- */
-try{const t=$('#samplePlan').textContent;if(t.trim()) ingest(t,'plany.txt',true)}catch(e){}
-try{const t=$('#sampleSched').textContent;if(t.trim()) ingest(t,'1 семестр — 2 неделя.json',true)}catch(e){}
-loadLocalFlags();buildRegistry();render();
+/* ---------- Связь с облачным режимом (cloud.js) ---------- */
+window.EduLOG={
+  CLOUD,CFG,esc,toast,fmtStamp,
+  get plan(){return PLAN},get sched(){return SCHED},
+  get view(){return st.view},
+  setView(v){st.view=v;render()},
+  // Загрузить опубликованный файл; meta — {updated_at, author}
+  load(kind,text,name,meta){const k=ingest(text,name,false,{meta});if(k!==kind) throw new Error(`«${name}»: ожидался ${kind==='plan'?'план':'файл расписания'}.`);return k},
+  clear(kind){if(kind==='plan') PLAN=null;else if(kind==='sched') SCHED=null;else{PLAN=null;SCHED=null}FVER++},
+  markPublished(kind,meta){const o=kind==='plan'?PLAN:SCHED;if(o){o.local=false;o.meta=meta}},
+  setFlags(rows){FLAGS=new Map();for(const r of rows){let s=FLAGS.get(r.grp);if(!s){s=new Set();FLAGS.set(r.grp,s)}s.add(r.code)}FVER++},
+  setCanFlag(v){CAN_FLAG=!!v},
+  refresh(){buildRegistry();closePreview();render()},
+};
+if(!CLOUD){
+  try{const t=$('#samplePlan').textContent;if(t.trim()) ingest(t,'plany.txt',true)}catch(e){}
+  try{const t=$('#sampleSched').textContent;if(t.trim()) ingest(t,'1 семестр — 2 неделя.json',true)}catch(e){}
+  loadLocalFlags();
+}
+buildRegistry();render();
 })();
