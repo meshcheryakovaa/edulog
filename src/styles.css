@@ -365,6 +365,9 @@ th.w.chg::after{content:'';position:absolute;left:50%;bottom:2px;width:5px;heigh
 .zweeks label{gap:4px;font-size:13px;padding:2px 8px;border-radius:5px;background:var(--sunk);box-shadow:inset 0 0 0 1px var(--rule);cursor:pointer}
 .zweeks label small{font-size:11px}
 .zweeks.off{opacity:.5}
+.zweeks label.empty{opacity:.6}
+.zf.off{opacity:.5}
+.zf .link{font-size:12px}
 .zf-opt{display:flex;align-items:center;gap:8px}
 .zd-act{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
 
