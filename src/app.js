@@ -4,6 +4,8 @@
 const CFG=window.EDULOG_CONFIG||{};
 const CLOUD=!!(CFG.supabaseUrl&&CFG.supabaseAnonKey);
 let CAN_FLAG=!CLOUD;
+// Роль «Просмотр»: доступны только расписание и его печать (план, журнал и словари скрыты)
+let VIEW_ONLY=false;
 const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const plural=(n,a,b,c)=>{const m=n%10,h=n%100;return m===1&&h!==11?a:(m>=2&&m<=4&&(h<10||h>=20)?b:c)};
@@ -604,7 +606,7 @@ function renderList(){
   const cur=st.key[st.mode];
   const T=st.view==='changes'?null:touchedFor(st.view)[st.mode];
   const btn=i=>`<button class="item${i.present?'':' absent'}${i.all?' all':''}" data-key="${esc(i.key)}" aria-current="${i.key===cur}">`+
-    (i.dot?`<span class="dot ${i.dot}"></span>`:'')+`<span class="nm"${i.all?'':tip(i.label,fullLabel(st.mode,i.key))}>${esc(i.label)}</span>`+
+    (i.dot&&!VIEW_ONLY?`<span class="dot ${i.dot}"></span>`:'')+`<span class="nm"${i.all?'':tip(i.label,fullLabel(st.mode,i.key))}>${esc(i.label)}</span>`+
     (T&&T.has(i.key)?`<span class="chm" title="${st.view==='sched'?'Есть изменения на этой неделе':'Есть изменения в последней загрузке расписания'}">изм.</span>`:'')+`<span class="n">${i.n}</span></button>`;
   if(st.mode==='group'){
     const secs=[...new Map(its.map(i=>[i.sec,i.secO])).entries()].sort((a,b)=>a[1]-b[1]).map(x=>x[0]);
@@ -613,7 +615,8 @@ function renderList(){
 }
 function renderTabs(){
   document.querySelectorAll('.tab').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.mode===st.mode)));
-  document.querySelectorAll('.seg [data-view]').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.view===st.view)));
+  document.querySelectorAll('.seg [data-view]').forEach(b=>{b.setAttribute('aria-selected',String(b.dataset.view===st.view));if(b.dataset.view!=='admin') b.hidden=VIEW_ONLY&&b.dataset.view!=='sched'});
+  document.querySelector('label[for=file]').hidden=VIEW_ONLY;$('#pdf-zach').hidden=VIEW_ONLY;$('#srcPlan').hidden=VIEW_ONLY;
 }
 const MODE_NAME={group:'группы',teacher:'преподавателя',room:'аудитории'};
 const label=(mode,key)=>mode==='teacher'?tShow(key):mode==='group'?gShow(key):rShow(key);
@@ -771,13 +774,13 @@ function reconPanel(mode,key,w){
 }
 function renderSched(key){
   const main=$('#main');
-  if(!SCHED||!SCHED.weeks.length) return main.innerHTML=emptyCard(SCHED?'В базе нет недель':'Расписание не загружено','Откройте JSON-файл расписания (раздел timetable): одна или несколько целых недель. Загрузка заменяет только эти недели, остальные остаются. План при этом останется загруженным, и расписание можно будет сверить с ним.',true);
+  if(!SCHED||!SCHED.weeks.length) return main.innerHTML=VIEW_ONLY?emptyCard('Расписание не опубликовано','Пока нет ни одной недели расписания. Оно появится здесь, когда редактор его опубликует.'):emptyCard(SCHED?'В базе нет недель':'Расписание не загружено','Откройте JSON-файл расписания (раздел timetable): одна или несколько целых недель. Загрузка заменяет только эти недели, остальные остаются. План при этом останется загруженным, и расписание можно будет сверить с ним.',true);
   const w=W();const mode=st.mode;
   if(mode==='room'&&key==='*') return renderRoomsGrid(w);
   if(key==null) return main.innerHTML=`<div class="head">${weekNav(w)}</div>`+emptyCard('Список пуст','В расписании нет записей для этого раздела.');
   const recs=schedRecs(mode,key,w);const cs=cards(recs,mode);const conf=markConflicts(cs,mode,key);
   const ghosts=markChanges(cs,mode,key,w);const chn=cs.filter(c=>c.chg).length+ghosts.length;
-  const s=slots(recs),g=gaps(recs);const pp=planPairs(mode,key,w);
+  const s=slots(recs),g=gaps(recs);const pp=VIEW_ONLY?null:planPairs(mode,key,w);
   const days=new Set(recs.map(r=>r.day)).size;
   let stats=`<div class="stat"><dt>Пар за неделю</dt><dd>${s}</dd></div>`;
   if(pp!=null) stats+=`<div class="stat${pp!==s?' warn':''}"><dt>По плану на нед. ${w.week}</dt><dd>${pp}${pp!==s?` <small>${s-pp>0?'+':''}${s-pp}</small>`:''}</dd></div>`;
@@ -790,10 +793,10 @@ function renderSched(key){
   const course=mode==='group'&&REG.courses[key]?`<span class="pill mute">${REG.courses[key]} курс</span>`:'';
   const head=`<section class="head"><div class="head-l"><span class="eyebrow">Расписание ${MODE_NAME[mode]}</span>${titleRow(key)}${course?`<div>${course}</div>`:''}</div>${weekNav(w)}</section>`;
   const chp=entityChangesPanel(mode,key,{week:w.key,quiet:true});
-  if(!recs.length){main.innerHTML=head+emptyCard('Нет занятий',`На этой неделе в расписании нет занятий: ${esc(label(mode,key))}.`)+chp+reconPanel(mode,key,w);return}
+  if(!recs.length){main.innerHTML=head+emptyCard('Нет занятий',`На этой неделе в расписании нет занятий: ${esc(label(mode,key))}.`)+chp+(VIEW_ONLY?'':reconPanel(mode,key,w));return}
   main.innerHTML=head+`<dl class="stats">${stats}</dl>
     <div class="legend"><span>Клик по преподавателю, аудитории или группе открывает её расписание</span><span>Правый клик — быстрый просмотр недели</span><span>Во всю ширину — вся группа, слева — 1 подгруппа, справа — 2 подгруппа</span>${chn?'<span>«Новое», «Изменено», «Отменено» — по последней загрузке этой недели</span>':''}</div>
-    ${weekTable(cs,mode,w,false,ghosts)}${chp}${mode!=='room'?reconPanel(mode,key,w):''}`;
+    ${weekTable(cs,mode,w,false,ghosts)}${chp}${mode!=='room'&&!VIEW_ONLY?reconPanel(mode,key,w):''}`;
 }
 function renderRoomsGrid(w){
   const rooms=[...new Set(w.recs.flatMap(r=>r.rooms))].sort(cmpRooms);
@@ -838,12 +841,40 @@ function uploadStamp(e){
   const d=new Date(e.at);const t=isNaN(d)?'':fmtStamp(e.at);
   return `${esc(t)}${e.author?' · '+esc(e.author):''}${e.local?' <span class="pill warn" title="Изменение видно только вам, пока не нажата «Опубликовать»">не опубликовано</span>':''}`;
 }
+/* ---------- Отметки «просмотрено» ----------
+   У каждого пользователя свои. Ключ — загрузка + неделя + группа, день, пара и подгруппа,
+   поэтому одно изменение отмечается сразу везде: у группы, преподавателя и аудитории. */
+let SEEN=new Set(), CAN_SEEN=!CLOUD;
+const SKEY_SEEN='edulog-seen';
+const seenKey=r=>r.e.id+'|'+[r.w.k,r.c.g,r.c.d,r.c.p,r.c.sg||0].join('|');
+const isSeen=r=>SEEN.has(seenKey(r));
+// неопубликованную загрузку отметить нельзя: у неё ещё нет номера в базе
+const seenable=r=>CAN_SEEN&&!r.e.local;
+function loadLocalSeen(){try{const a=JSON.parse(localStorage.getItem(SKEY_SEEN)||'[]');if(Array.isArray(a)) SEEN=new Set(a)}catch(e){}}
+function saveLocalSeen(){
+  // отметки удалённых из журнала загрузок больше не нужны
+  const ids=new Set(SCHED?SCHED.history.map(e=>String(e.id)):[]);
+  try{localStorage.setItem(SKEY_SEEN,JSON.stringify([...SEEN].filter(k=>ids.has(k.slice(0,k.indexOf('|'))))))}catch(e){}
+}
+function setSeen(keys,on){
+  keys=[...new Set(keys)].filter(k=>SEEN.has(k)!==on);if(!keys.length){render();return}
+  const apply=v=>keys.forEach(k=>v?SEEN.add(k):SEEN.delete(k));
+  apply(on);render();
+  if(!CLOUD){saveLocalSeen();return}
+  Promise.resolve(window.EduLOGCloud&&window.EduLOGCloud.saveSeen(keys,on)).catch(e=>{apply(!on);render();toast(e&&e.message||'Не удалось сохранить отметку.',true)});
+}
+let PANEL_FRESH=[]; // ключи непросмотренных в панели «Изменения этой недели» — для «отметить все»
+function seenCell(r){
+  if(!seenable(r)) return `<td class="c-seen"><input type="checkbox" class="seen-cb" disabled title="${r.e.local?'Отметить можно после публикации':'Отмечать могут пользователи с ролью «Просмотр» и выше'}" aria-label="Просмотрено"></td>`;
+  const on=isSeen(r);
+  return `<td class="c-seen"><input type="checkbox" class="seen-cb" data-sk="${esc(seenKey(r))}"${on?' checked':''} title="${on?'Просмотрено — снять отметку':'Отметить как просмотренное'}" aria-label="Просмотрено"></td>`;
+}
 /* таблица изменений для группы, преподавателя или аудитории */
 function changesTable(rows,mode,opt){
   opt=opt||{};
-  const showWeek=!opt.week, showGroup=opt.showGroup!=null?opt.showGroup:mode!=='group';
-  return `<div class="rc-wrap"><table class="rc chg-t"><thead><tr>${showWeek?'<th>Неделя</th>':''}<th>Когда</th>${showGroup?'<th>Группа</th>':''}<th>Что</th><th>Загрузка</th></tr></thead><tbody>`+
-    rows.map(r=>`<tr class="k-${r.kind}">${showWeek?`<td class="c-num"><button class="link" data-gowk="${esc(r.w.k)}">${r.w.week?'нед. '+r.w.week:esc(fmtRange(r.w))}</button></td>`:''}`+
+  const showWeek=!opt.week, showGroup=opt.showGroup!=null?opt.showGroup:mode!=='group', showSeen=CAN_SEEN;
+  return `<div class="rc-wrap"><table class="rc chg-t"><thead><tr>${showSeen?'<th class="c-seen" title="Просмотрено">✓</th>':''}${showWeek?'<th>Неделя</th>':''}<th>Когда</th>${showGroup?'<th>Группа</th>':''}<th>Что</th><th>Загрузка</th></tr></thead><tbody>`+
+    rows.map(r=>`<tr class="k-${r.kind}${showSeen&&isSeen(r)?' seen':''}">${showSeen?seenCell(r):''}${showWeek?`<td class="c-num"><button class="link" data-gowk="${esc(r.w.k)}">${r.w.week?'нед. '+r.w.week:esc(fmtRange(r.w))}</button></td>`:''}`+
       `<td class="when">${whenTxt(r.c)}</td>${showGroup?`<td>${linkG(r.c.g)}</td>`:''}<td class="what">${kindTag(r.kind)}${whatHtml(r)}</td><td class="up">${esc(r.e.file||'—')}<small>${uploadStamp(r.e)}</small></td></tr>`).join('')+
     '</tbody></table></div>';
 }
@@ -854,11 +885,18 @@ function entityChangesPanel(mode,key,opt){
   const lim=opt.limit||12;
   const title=opt.week?`Изменения этой недели`:'Изменения в расписании';
   if(!all.length) return opt.quiet?'':`<section class="panel chg-p"><h2>${title}<span class="pill">нет</span></h2><p class="note">${opt.week?'При загрузках расписания эта неделя для выбранного не менялась.':'В загруженных файлах расписания для выбранного ничего не менялось.'}</p></section>`;
-  const n={add:0,del:0,chg:0};all.forEach(r=>n[r.kind]++);
-  const pills=['add','chg','del'].filter(k=>n[k]).map(k=>`<span class="ck ${KIND[k][1]}">${KIND[k][0]}: ${n[k]}</span>`).join('');
-  const more=all.length>lim?`<details class="more"><summary>Показать все (${all.length})</summary>${changesTable(all.slice(lim),mode,opt)}</details>`:'';
-  return `<section class="panel chg-p" aria-label="${title}"><h2>${title}<span class="cks">${pills}</span><button class="link sm" data-view-go="changes">весь журнал →</button></h2>
-    ${changesTable(all.slice(0,lim),mode,opt)}${more}
+  // непросмотренные сверху, просмотренные — свёрнутой группой внизу
+  const old=CAN_SEEN?all.filter(isSeen):[], fresh=CAN_SEEN?all.filter(r=>!isSeen(r)):all;
+  const n={add:0,del:0,chg:0};fresh.forEach(r=>n[r.kind]++);
+  const pills=['add','chg','del'].filter(k=>n[k]).map(k=>`<span class="ck ${KIND[k][1]}">${KIND[k][0]}: ${n[k]}</span>`).join('')+
+    (old.length?`<span class="pill mute">просмотрено: ${old.length}</span>`:'');
+  const more=fresh.length>lim?`<details class="more"><summary>Показать все (${fresh.length})</summary>${changesTable(fresh.slice(lim),mode,opt)}</details>`:'';
+  const canAll=fresh.filter(seenable);PANEL_FRESH=canAll.map(seenKey);
+  const allBtn=canAll.length>1?`<button class="link sm" data-seenall>отметить все просмотренными</button>`:'';
+  const freshHtml=fresh.length?changesTable(fresh.slice(0,lim),mode,opt)+more:`<p class="note seen-done">Все изменения просмотрены.</p>`;
+  const oldHtml=old.length?`<details class="more seen-g"><summary>Просмотренные (${old.length})</summary>${changesTable(old,mode,opt)}</details>`:'';
+  return `<section class="panel chg-p" aria-label="${title}"><h2>${title}<span class="cks">${pills}</span>${allBtn}${VIEW_ONLY?'':'<button class="link sm" data-view-go="changes">весь журнал →</button>'}</h2>
+    ${freshHtml}${oldHtml}
     <p class="note">${opt.week?'Сравнение с тем, что было в базе до последней загрузки этой недели.':'По журналу загрузок расписания, новые сверху. Каждая загрузка заменяет только недели из своего файла.'}</p></section>`;
 }
 /* подсветка в сетке недели: что добавлено/изменено, и «призраки» отменённых занятий */
@@ -1032,6 +1070,7 @@ function closePreview(){$('#modal').hidden=true;document.body.classList.remove('
 
 /* ---------- Отрисовка ---------- */
 function render(){
+  if(VIEW_ONLY&&st.view!=='sched'&&st.view!=='admin') st.view='sched';
   renderTabs();
   document.body.classList.toggle('v-admin',st.view==='admin');
   document.body.classList.toggle('v-dict',st.view==='dict');
@@ -1094,6 +1133,7 @@ function ingest(text,name,sample,extra){
   PLAN=Object.assign({name,file:name,groups,sample,raw:text},extra);FVER++;return 'plan';
 }
 async function openFiles(files){
+  if(VIEW_ONLY){toast('Роль «Просмотр»: открывать файлы может редактор.',true);return}
   const done=[],report=[];let last=null;
   // файлы применяются по очереди: если одна неделя есть в двух файлах, останется из последнего
   for(const f of files){try{last=ingest(decode(await f.arrayBuffer()),f.name,false,{local:true,report});done.push(f.name)}catch(e){toast(e.message||'Не удалось открыть файл.',true)}}
@@ -1104,7 +1144,7 @@ async function openFiles(files){
 }
 $('#file').addEventListener('change',e=>{openFiles([...e.target.files]);e.target.value=''});
 let dragN=0;
-addEventListener('dragenter',e=>{if([...(e.dataTransfer&&e.dataTransfer.types||[])].includes('Files')){dragN++;$('#drop').hidden=false}});
+addEventListener('dragenter',e=>{if(!VIEW_ONLY&&[...(e.dataTransfer&&e.dataTransfer.types||[])].includes('Files')){dragN++;$('#drop').hidden=false}});
 addEventListener('dragleave',()=>{if(--dragN<=0){dragN=0;$('#drop').hidden=true}});
 addEventListener('dragover',e=>e.preventDefault());
 addEventListener('drop',e=>{e.preventDefault();dragN=0;$('#drop').hidden=true;openFiles([...e.dataTransfer.files])});
@@ -1138,6 +1178,7 @@ document.addEventListener('click',e=>{
   const wk=e.target.closest('[data-wk]');if(wk&&SCHED){st.wi=Math.max(0,Math.min(SCHED.weeks.length-1,st.wi+(+wk.dataset.wk)));render();return}
   const gw=e.target.closest('[data-gowk]');if(gw&&SCHED){const i=SCHED.weeks.findIndex(x=>x.key===gw.dataset.gowk);if(i<0){toast('Этой недели уже нет в базе.',true);return}
     st.wi=i;st.view='sched';if(st.key[st.mode]==='*'&&st.mode!=='room') st.key[st.mode]=null;closePreview();render();scrollTo({top:0});return}
+  if(e.target.closest('[data-seenall]')){setSeen(PANEL_FRESH,true);return}
   const vg=e.target.closest('[data-view-go]');if(vg){st.view=vg.dataset.viewGo;if(vg.dataset.dtabGo) st.dtab=vg.dataset.dtabGo;closePropMenu();render();scrollTo({top:0});return}
   const pb=e.target.closest('[data-prow]');if(pb){if(!PMENU.hidden&&PMENU.dataset.row===pb.dataset.prow) closePropMenu();else openPropMenu(pb);return}
   const pfb=e.target.closest('[data-pf]');if(pfb){st.pf=pfb.dataset.pf&&st.pf!==pfb.dataset.pf?pfb.dataset.pf:null;render();return}
@@ -1154,6 +1195,7 @@ document.addEventListener('click',e=>{
 document.addEventListener('change',e=>{
   if(e.target.id==='onlyMis'){st.onlyMis=e.target.checked;render();return}
   if(e.target.id==='chOnly'){st.chOnly=e.target.checked;render();return}
+  if(e.target.classList.contains('seen-cb')&&e.target.dataset.sk){setSeen([e.target.dataset.sk],e.target.checked);return}
   if(e.target.id==='zAll'){setFlags(ZROWS,e.target.checked);return}
   if(e.target.id==='donly'){st.donly=e.target.checked;fillDict();return}
   if(e.target.classList.contains('dshort')){setShort(st.dtab,e.target.dataset.dk,e.target.value);e.target.value=NAMES[st.dtab].get(e.target.dataset.dk)||'';e.target.closest('tr').classList.toggle('has',!!e.target.value);return}
@@ -1491,6 +1533,9 @@ window.EduLOG={
   computeUpload,
   setFlags(rows){FLAGS=new Map();for(const r of rows){let s=FLAGS.get(r.grp);if(!s){s=new Set();FLAGS.set(r.grp,s)}s.add(r.code)}FVER++},
   setCanFlag(v){CAN_FLAG=!!v},
+  setViewOnly(v){VIEW_ONLY=!!v},
+  // отметки «просмотрено» текущего пользователя: [{upload_id, ckey}]; can — можно ли отмечать
+  setSeen(rows,can){SEEN=new Set((rows||[]).map(r=>r.upload_id+'|'+r.ckey));CAN_SEEN=!!can},
   // Словари из таблиц dict_names / props / row_props
   setDict,
   refresh(){buildRegistry();closePreview();render()},
@@ -1501,7 +1546,7 @@ if(!CLOUD){
   let saved=null;try{saved=localStorage.getItem(SKEY_SCHED)}catch(e){}
   if(saved){try{ingest(saved,'',false,{})}catch(e){saved=null}}
   if(!saved){try{const t=$('#sampleSched').textContent;if(t.trim()) ingest(t,'1 семестр — 2 неделя.json',true)}catch(e){}}
-  loadLocalFlags();loadLocalDict();
+  loadLocalFlags();loadLocalDict();loadLocalSeen();
 }
 buildRegistry();render();
 })();

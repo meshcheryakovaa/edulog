@@ -229,6 +229,28 @@ end $$;
 revoke all on function public.sched_apply(text, jsonb, text[], jsonb) from public, anon;
 grant execute on function public.sched_apply(text, jsonb, text[], jsonb) to authenticated;
 
+-- ---------- Отметки «просмотрено» ----------
+-- Каждый пользователь (Просмотр, Редактор, Администратор) отмечает изменения расписания,
+-- которые он уже посмотрел. Отметки личные: другие их не видят.
+-- ckey — неделя|группа|день|пара|подгруппа внутри загрузки upload_id.
+create table if not exists public.sched_seen (
+  user_id     uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  upload_id   bigint not null references public.sched_uploads(id) on delete cascade,
+  ckey        text not null check (length(ckey) <= 1000),
+  at          timestamptz not null default now(),
+  primary key (user_id, upload_id, ckey)
+);
+alter table public.sched_seen enable row level security;
+drop policy if exists sched_seen_select on public.sched_seen;
+create policy sched_seen_select on public.sched_seen for select to authenticated
+  using (user_id = auth.uid() and public.can_read());
+drop policy if exists sched_seen_insert on public.sched_seen;
+create policy sched_seen_insert on public.sched_seen for insert to authenticated
+  with check (user_id = auth.uid() and public.can_read());
+drop policy if exists sched_seen_delete on public.sched_seen;
+create policy sched_seen_delete on public.sched_seen for delete to authenticated
+  using (user_id = auth.uid());
+
 -- ---------- Словари ----------
 -- dict_names — короткие названия для отображения на экране. Истинное название — ключ (key):
 --   disc    — дисциплина без «1-»/«2-» и «(1 подгруппа)», как в расписании;
@@ -401,7 +423,8 @@ grant select, insert, update, delete on public.datasets to authenticated;
 grant select, insert, update, delete on public.zachety to authenticated;
 grant select, insert, update, delete on public.sched_weeks to authenticated;
 grant select, insert on public.sched_uploads to authenticated;
+grant select, insert, delete on public.sched_seen to authenticated;
 grant select, insert, update, delete on public.dict_names, public.props, public.row_props to authenticated;
 grant select on public.audit_log to authenticated;
-revoke all on public.profiles, public.datasets, public.zachety, public.audit_log, public.sched_weeks, public.sched_uploads,
+revoke all on public.profiles, public.datasets, public.zachety, public.audit_log, public.sched_weeks, public.sched_uploads, public.sched_seen,
   public.dict_names, public.props, public.row_props from anon;
