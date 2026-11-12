@@ -303,6 +303,11 @@ table.adm tr.off td{color:var(--muted)}
 .ck.add{background:var(--add-bg);color:var(--add)}
 .ck.del{background:var(--del-bg);color:var(--del)}
 .ck.chg{background:var(--chg-bg);color:var(--chg)}
+.ck.z{background:var(--bad-bg);color:var(--bad)}
+.chg-t tr.k-z td:first-child{box-shadow:inset 3px 0 0 var(--bad)}
+.chg-t .ci .zw s{color:var(--muted)}
+.chg-t .ci .zw b{font-weight:600;color:var(--ink)}
+.seg .tcnt{display:inline-block;min-width:18px;margin-left:4px;padding:0 5px;border-radius:999px;background:var(--bad);color:var(--surface);font-size:11px;font-weight:600;line-height:18px;text-align:center;vertical-align:1px}
 .cks{display:inline-flex;flex-wrap:wrap;gap:6px}
 .panel h2 .link.sm{margin-left:auto;font-weight:400}
 .chg-t td{vertical-align:top}
