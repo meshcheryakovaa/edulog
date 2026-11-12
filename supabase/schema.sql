@@ -251,6 +251,25 @@ drop policy if exists sched_seen_delete on public.sched_seen;
 create policy sched_seen_delete on public.sched_seen for delete to authenticated
   using (user_id = auth.uid());
 
+-- ---------- Служебное состояние ----------
+-- key = 'zpos': где стоял каждый зачёт при последней публикации (группа|код|подгруппа → неделя, день, пара).
+-- Редактор после публикации сравнивает с ним новое положение; сдвиги записываются в sched_uploads
+-- отдельной записью (summary.kind = 'zachet', summary.z — переносы).
+create table if not exists public.app_state (
+  key         text primary key,
+  value       jsonb not null default '{}'::jsonb,
+  updated_by  uuid references auth.users(id) on delete set null default auth.uid(),
+  updated_at  timestamptz not null default now()
+);
+alter table public.app_state enable row level security;
+drop policy if exists app_state_select on public.app_state;
+create policy app_state_select on public.app_state for select to authenticated using (public.can_edit());
+drop policy if exists app_state_insert on public.app_state;
+create policy app_state_insert on public.app_state for insert to authenticated with check (public.can_edit());
+drop policy if exists app_state_update on public.app_state;
+create policy app_state_update on public.app_state for update to authenticated
+  using (public.can_edit()) with check (public.can_edit());
+
 -- ---------- Словари ----------
 -- dict_names — короткие названия для отображения на экране. Истинное название — ключ (key):
 --   disc    — дисциплина без «1-»/«2-» и «(1 подгруппа)», как в расписании;
@@ -347,7 +366,8 @@ begin
     end if;
   elsif tg_table_name = 'sched_uploads' then
     act := 'sched.upload';
-    det := jsonb_build_object('file', new.file, 'weeks',
+    det := jsonb_build_object('file', new.file, 'kind', coalesce(new.summary->>'kind', ''),
+      'z', jsonb_array_length(coalesce(new.summary->'z', '[]'::jsonb)), 'weeks',
       coalesce((select jsonb_agg(jsonb_build_object('k', x->>'k', 'week', x->'week', 'st', x->>'st'))
                 from jsonb_array_elements(coalesce(new.summary->'weeks', '[]'::jsonb)) x), '[]'::jsonb));
   elsif tg_table_name = 'zachety' then
@@ -424,7 +444,8 @@ grant select, insert, update, delete on public.zachety to authenticated;
 grant select, insert, update, delete on public.sched_weeks to authenticated;
 grant select, insert on public.sched_uploads to authenticated;
 grant select, insert, delete on public.sched_seen to authenticated;
+grant select, insert, update on public.app_state to authenticated;
 grant select, insert, update, delete on public.dict_names, public.props, public.row_props to authenticated;
 grant select on public.audit_log to authenticated;
-revoke all on public.profiles, public.datasets, public.zachety, public.audit_log, public.sched_weeks, public.sched_uploads, public.sched_seen,
+revoke all on public.profiles, public.datasets, public.zachety, public.audit_log, public.sched_weeks, public.sched_uploads, public.sched_seen, public.app_state,
   public.dict_names, public.props, public.row_props from anon;

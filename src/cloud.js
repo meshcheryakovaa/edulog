@@ -207,6 +207,7 @@ let flagBusy=0; // отметки зачётов, ещё не дошедшие �
 async function saveFlags(pairs,on){
   flagBusy++;
   try{await writeFlags(pairs,on)}finally{flagBusy--}
+  zachetSync().catch(()=>{});
 }
 async function writeFlags(pairs,on){
   if(on){
@@ -260,6 +261,28 @@ async function applySchedOp(op){
     p_summary:{weeks:entry.weeks,ch:entry.ch,migrate:!!op.migrate},
   }});
 }
+/* Перенос зачётов: редактор после публикации (и после отметки зачёта) сравнивает, где сейчас стоят
+   зачёты, с прошлым положением из app_state.zpos. Сдвиги пишутся в журнал загрузок отдельной записью. */
+let ZPOS_DB=true, zBusy=false;
+async function zachetSync(){
+  if(zBusy||!canEdit()||!SCHED_DB||!ZPOS_DB) return;
+  if([A.plan,A.sched].some(o=>o&&o.local)) return; // сравниваем только опубликованное
+  const now=A.zachetPos();if(!now) return;
+  zBusy=true;
+  try{
+    let prev=null;
+    try{const r=await api('/rest/v1/app_state?select=value&key=eq.zpos');prev=r&&r[0]?r[0].value:null}
+    catch(e){if(missingTable(e)){ZPOS_DB=false;return}throw e}
+    const mv=A.zachetMoves(prev,now);
+    if(mv.length) await api('/rest/v1/rpc/sched_apply',{method:'POST',body:{p_file:'',p_put:[],p_del:[],p_summary:{kind:'zachet',weeks:[],ch:{},z:mv}}});
+    await api('/rest/v1/app_state?on_conflict=key',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:{key:'zpos',value:now}});
+    if(mv.length){
+      const sd=await fetchSched();
+      if(sd&&sd.ups.length){META.sched=schedMeta(sd.rows,sd.ups);A.loadSchedDB(sd.rows,sd.ups,META.sched);pushSeen(await fetchSeen(sd.ups).catch(()=>[]))}
+      A.refresh();A.toast(`Зачёты перенесены: ${mv.length}. Перенос записан в журнал изменений.`);
+    }
+  }finally{zBusy=false}
+}
 async function publishSched(){
   if(!SCHED_DB) throw new Error(SCHEMA_HINT);
   // Загрузки отправляются по одной; отправленная сразу убирается из очереди,
@@ -286,6 +309,7 @@ async function publish(){
       META[kind]={name:r.name,updated_at:r.updated_at,author:r.author,size:r.size};
       A.markPublished(kind,META[kind]);
     }
+    await zachetSync().catch(e=>A.toast('Не удалось проверить перенос зачётов: '+e.message,true));
     A.toast(items.length>1?'План и расписание опубликованы для всех':(items[0][0]==='plan'?'План опубликован для всех':'Изменения расписания опубликованы для всех'));
   }catch(e){A.toast(e.message,true)}
   finally{btn.disabled=false;btn.textContent='Опубликовать';A.refresh()}
@@ -440,6 +464,7 @@ async function boot(){
   if(ME.role==='pending'||ME.role==='blocked'){showGate(ME.role);return}
   A.setCanFlag(canEdit());A.setViewOnly(role()==='viewer');
   try{await loadData()}catch(e){A.toast(e.message,true)}
+  zachetSync().catch(()=>{});
   lastCheck=Date.now();
   hideGate();
 }
@@ -460,7 +485,7 @@ let ADM={users:[],log:[],tab:'users',loading:false,err:''};
 const ACT={
   'dataset.publish':d=>`опубликовал(а) ${d.kind==='plan'?'план':'расписание'} «${d.name}»`,
   'dataset.delete':d=>`снял(а) с публикации ${d.kind==='plan'?'план':'расписание'} «${d.name}»`,
-  'sched.upload':d=>d.file?`загрузил(а) расписание «${d.file}»: ${schedWeeksText(d.weeks||[])}`:`удалил(а) из расписания ${schedWeeksText(d.weeks||[])}`,
+  'sched.upload':d=>d.kind==='zachet'?`перенос зачётов: ${d.z||0}`:d.file?`загрузил(а) расписание «${d.file}»: ${schedWeeksText(d.weeks||[])}`:`удалил(а) из расписания ${schedWeeksText(d.weeks||[])}`,
   'zachet.on':d=>`отметил(а) зачёт ${d.code} у группы ${d.group}`,
   'zachet.off':d=>`снял(а) зачёт ${d.code} у группы ${d.group}`,
   'dict.name':d=>d.short?`короткое название «${d.short}» для «${d.key}» (${DICT_KIND[d.kind]||d.kind})`:`убрал(а) короткое название у «${d.key}» (${DICT_KIND[d.kind]||d.kind})`,
