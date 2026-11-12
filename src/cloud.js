@@ -16,8 +16,8 @@ const SKEY='edulog-auth';
 const ROLES={pending:'Ожидает',viewer:'Просмотр',editor:'Редактор',admin:'Администратор',blocked:'Заблокирован'};
 const ROLE_HINT={
   pending:'зарегистрировался, данных не видит',
-  viewer:'видит план, расписание и зачёты',
-  editor:'публикует файлы и отмечает зачёты',
+  viewer:'видит только расписание и печатает его, отмечает просмотренные изменения',
+  editor:'видит всё, публикует файлы и отмечает зачёты',
   admin:'всё, плюс пользователи и журнал',
   blocked:'доступ закрыт',
 };
@@ -106,6 +106,29 @@ async function fetchDict(){
     DICT_DB=true;return {names:names||[],props:props||[],rprops:rprops||[]};
   }catch(e){if(missingTable(e)){DICT_DB=false;return null}throw e}
 }
+// Отметки «просмотрено» текущего пользователя (таблица sched_seen), только для загрузок из журнала
+let SEEN_DB=true; // false — таблицы sched_seen ещё нет
+const SEEN_HINT='Отметки «просмотрено» недоступны: администратору нужно ещё раз выполнить supabase/schema.sql в Supabase → SQL Editor.';
+async function fetchSeen(ups){
+  if(!ups||!ups.length||!ME) return [];
+  const min=Math.min(...ups.map(u=>u.id));
+  try{
+    const r=await api('/rest/v1/sched_seen?select=upload_id,ckey&user_id=eq.'+q(ME.id)+'&upload_id=gte.'+min);
+    SEEN_DB=true;return r||[];
+  }catch(e){if(missingTable(e)){SEEN_DB=false;return []}throw e}
+}
+const pushSeen=rows=>A.setSeen(rows,canRead()&&SEEN_DB);
+async function saveSeen(keys,on){
+  if(!SEEN_DB) throw new Error(SEEN_HINT);
+  const by=new Map();
+  for(const k of keys){const i=k.indexOf('|');const id=+k.slice(0,i);if(!id) continue;(by.get(id)||by.set(id,[]).get(id)).push(k.slice(i+1))}
+  if(on){
+    const rows=[];for(const [id,cs] of by) for(const c of cs) rows.push({upload_id:id,ckey:c});
+    if(rows.length) await api('/rest/v1/sched_seen?on_conflict=user_id,upload_id,ckey',{method:'POST',headers:{Prefer:'resolution=ignore-duplicates,return=minimal'},body:rows});
+    return;
+  }
+  await Promise.all([...by].map(([id,cs])=>api('/rest/v1/sched_seen?user_id=eq.'+q(ME.id)+'&upload_id=eq.'+id+'&ckey=in.'+q(inList(cs)),{method:'DELETE',headers:{Prefer:'return=minimal'}})));
+}
 function schedMeta(rows,ups){
   const u=ups[0];
   return {name:(ups.find(x=>x.file)||{}).file||'',updated_at:u.at,author:u.author,ver:u.id,weeks:rows.length,size:rows.reduce((a,r)=>a+(r.content||'').length,0)};
@@ -125,11 +148,13 @@ async function loadData(){
   // Расписание по неделям: если загрузки уже были, база — таблица sched_weeks,
   // иначе — расписание, опубликованное раньше одним файлом (перенесётся при первой публикации).
   if(sd&&sd.ups.length){META.sched=schedMeta(sd.rows,sd.ups);A.loadSchedDB(sd.rows,sd.ups,META.sched)}
+  pushSeen(sd?await fetchSeen(sd.ups).catch(()=>[]):[]);
   A.setFlags(zs||[]);
   A.setDict(dc||{});
   A.refresh();
   if(!SCHED_DB&&canEdit()) A.toast(SCHEMA_HINT,true);
   else if(!DICT_DB&&canEdit()) A.toast(DICT_HINT,true);
+  else if(!SEEN_DB&&isAdmin()) A.toast(SEEN_HINT,true);
 }
 // Тихо подтянуть изменения, если кто-то опубликовал новое или поменял зачёты.
 let lastCheck=0;
@@ -149,7 +174,7 @@ async function checkUpdates(){
     const ver=top&&top[0]?top[0].id:null;
     if(ver!=null&&!(META.sched&&META.sched.ver===ver)&&!schedLocal){
       const sd=await fetchSched();
-      if(sd&&sd.ups.length){META.sched=schedMeta(sd.rows,sd.ups);A.loadSchedDB(sd.rows,sd.ups,META.sched);changed=true}
+      if(sd&&sd.ups.length){META.sched=schedMeta(sd.rows,sd.ups);A.loadSchedDB(sd.rows,sd.ups,META.sched);pushSeen(await fetchSeen(sd.ups).catch(()=>[]));changed=true}
     }
     const hasDB=!!(META.sched&&META.sched.ver!=null);
     for(const d of ds||[]){
@@ -385,7 +410,7 @@ function renderMe(){
 
 /* ---------- Вход / выход ---------- */
 function signedOut(note){
-  keep(null);ME=null;META={};A.clear();A.setFlags([]);A.setDict({});A.setCanFlag(false);renderMe();
+  keep(null);ME=null;META={};A.clear();A.setFlags([]);A.setDict({});A.setCanFlag(false);A.setViewOnly(false);A.setSeen([],false);renderMe();
   if(A.view==='admin') A.setView('plan');else A.refresh();
   showGate('in',note);
 }
@@ -413,7 +438,7 @@ async function boot(){
   }
   renderMe();
   if(ME.role==='pending'||ME.role==='blocked'){showGate(ME.role);return}
-  A.setCanFlag(canEdit());
+  A.setCanFlag(canEdit());A.setViewOnly(role()==='viewer');
   try{await loadData()}catch(e){A.toast(e.message,true)}
   lastCheck=Date.now();
   hideGate();
@@ -544,7 +569,7 @@ document.addEventListener('change',e=>{
 });
 
 /* ---------- Экспорт для app.js ---------- */
-window.EduLOGCloud={saveFlag,saveFlags,saveDict,isAdmin,renderAdmin,onSources};
+window.EduLOGCloud={saveFlag,saveFlags,saveDict,saveSeen,isAdmin,renderAdmin,onSources};
 
 /* ---------- Старт ---------- */
 (async()=>{
