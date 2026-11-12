@@ -28,8 +28,8 @@
     <div class="pmenu">
       <button class="btn ghost" id="pdfBtn" aria-haspopup="true" aria-expanded="false">PDF ▾</button>
       <div class="pm-list" id="pdfMenu" hidden>
-        <button data-pdf="one" id="pdf-one"><b id="pdfOneLabel">Открытое расписание</b><small id="pdfOneSub">текущая неделя</small></button>
-        <button data-pdf="all" id="pdf-all"><b>Все группы</b><small id="pdfAllSub">каждая группа на отдельной странице</small></button>
+        <button data-pdf="one" id="pdf-one"><b id="pdfOneLabel">Открытое расписание…</b><small id="pdfOneSub">текущая или выбранные недели</small></button>
+        <button data-pdf="all" id="pdf-all"><b>Все группы…</b><small id="pdfAllSub">текущая или выбранные недели</small></button>
         <button data-pdf="zach" id="pdf-zach"><b>Зачёты…</b><small>выбрать группы и недели</small></button>
       </div>
     </div>
@@ -80,9 +80,36 @@
         <label><input type="radio" name="zw" value="pick"> Выбрать недели</label>
         <div class="zweeks" id="zdWeeks"></div>
       </fieldset>
+      <fieldset class="zf" id="zdFiles"><legend>Файлы</legend>
+        <label><input type="radio" name="zfile" value="one" checked> Одним файлом</label>
+        <label><input type="radio" name="zfile" value="sep"> Каждая неделя отдельным файлом</label>
+      </fieldset>
       <label class="zf-opt"><input type="checkbox" id="zdBreak" checked> Каждая группа с новой страницы</label>
       <p class="note" id="zdSum"></p>
       <div class="zd-act"><button class="btn ghost" data-zclose>Отмена</button><button class="btn" id="zdGo">Скачать PDF</button></div>
+    </div>
+  </section>
+</div>
+<div class="modal" id="sdlg" hidden>
+  <div class="modal-bg" data-sclose></div>
+  <section class="modal-p zd" role="dialog" aria-modal="true" aria-labelledby="sdTitle">
+    <div class="modal-h">
+      <div><div class="eyebrow">PDF</div><h2 id="sdTitle">Печать расписания</h2></div>
+      <span class="sp"></span>
+      <button class="x" data-sclose aria-label="Закрыть">×</button>
+    </div>
+    <div class="modal-b">
+      <fieldset class="zf"><legend>Недели</legend>
+        <label><input type="radio" name="sw" value="cur" checked> <span id="sdCurLabel">Текущая неделя</span></label>
+        <label><input type="radio" name="sw" value="pick"> Выбрать недели <button type="button" class="link" id="sdAll">все</button> <button type="button" class="link" id="sdNone">снять</button></label>
+        <div class="zweeks" id="sdWeeks"></div>
+      </fieldset>
+      <fieldset class="zf" id="sdFiles"><legend>Файлы</legend>
+        <label><input type="radio" name="sfile" value="one" checked> Одним файлом <small>(каждая неделя с новой страницы)</small></label>
+        <label><input type="radio" name="sfile" value="sep"> Каждая неделя отдельным файлом</label>
+      </fieldset>
+      <p class="note" id="sdSum"></p>
+      <div class="zd-act"><button class="btn ghost" data-sclose>Отмена</button><button class="btn" id="sdGo">Скачать PDF</button></div>
     </div>
   </section>
 </div>

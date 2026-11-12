@@ -1281,22 +1281,99 @@ function baseDoc(landscape,content){
     defaultStyle:{font:'Roboto',fontSize:7.5,color:PC.ink,lineHeight:1.1},
     footer:(cur,total)=>({columns:[{text:[PLAN?'План: '+PLAN.name:'',SCHED?(PLAN?' · ':'')+'Расписание: '+SCHED.name:''].join('')},{text:cur+' / '+total,alignment:'right'}],margin:[24,8,24,0],fontSize:6.5,color:PC.muted})};
 }
-async function makePdf(kind){
-  const w=W();
-  if(kind==='one'){
-    const key=st.key[st.mode];
-    if(!w) return toast('Сначала откройте файл расписания (.json).',true);
-    if(key==null||key==='*') return toast('Выберите группу, преподавателя или аудиторию.',true);
-    return savePdf(baseDoc(true,pdfWeekPage(st.mode,key,w,false)),`${entTitle(st.mode,key)}, неделя ${w.week||''}.pdf`.replace(/[\\/:*?"<>|]/g,'-'));
+const fname=s=>s.replace(/[\\/:*?"<>|]/g,'-');
+const wkName=w=>w.week?String(w.week):fmtRange(w);
+/* подпись набора недель: «неделя 3», «недели 3–5», «недели 3, 5, 8» */
+function wksTitle(ws){
+  const n=ws.map(w=>w.week);
+  if(ws.length===1) return 'неделя '+wkName(ws[0]);
+  if(n.every(Boolean)&&n.every((x,i)=>!i||x===n[i-1]+1)) return 'недели '+n[0]+'–'+n[n.length-1];
+  return 'недели '+ws.map(wkName).join(', ');
+}
+/* несколько файлов подряд: браузер может один раз спросить разрешение на множественную загрузку */
+async function savePdfs(files){
+  for(let i=0;i<files.length;i++){
+    if(i) await new Promise(r=>setTimeout(r,450));
+    await savePdf(files[i][0],files[i][1]);
   }
-  if(kind==='all'){
-    if(!w) return toast('Сначала откройте файл расписания (.json).',true);
-    const gs=sortedGroups([...new Set(w.recs.map(r=>r.group))]);
-    return savePdf(baseDoc(true,gs.flatMap((g,i)=>pdfWeekPage('group',g,w,i>0))),`Расписание всех групп, неделя ${w.week||''}.pdf`);
+  if(files.length>1) toast(`Сохранено ${files.length} ${plural(files.length,'PDF-файл','PDF-файла','PDF-файлов')}`);
+}
+async function makePdf(kind){
+  if(kind==='one'||kind==='all'){
+    if(!W()) return toast('Сначала откройте файл расписания (.json).',true);
+    const key=st.key[st.mode];
+    if(kind==='one'&&(key==null||key==='*')) return toast('Выберите группу, преподавателя или аудиторию.',true);
+    return openSchedDlg(kind);
   }
   if(!PLAN) return toast('Для зачётов нужен недельный план (.txt).',true);
   openCreditDlg();
 }
+
+/* ---------- Печать расписания: текущая или выбранные недели, один файл или по файлу на неделю ---------- */
+const SD={kind:'one',mode:'group',key:null,pick:new Set()};
+/* страницы одной недели; пустой массив — в эту неделю печатать нечего */
+function schedWeekContent(w,brk){
+  if(SD.kind==='one') return schedRecs(SD.mode,SD.key,w).length?pdfWeekPage(SD.mode,SD.key,w,brk):[];
+  const gs=sortedGroups([...new Set(w.recs.map(r=>r.group))]);
+  return gs.flatMap((g,i)=>pdfWeekPage('group',g,w,brk||i>0));
+}
+function schedSel(){
+  const wm=$('input[name=sw]:checked').value;
+  const ws=wm==='cur'?[W()].filter(Boolean):SCHED.weeks.filter(w=>SD.pick.has(w.key));
+  const sep=ws.length>1&&$('input[name=sfile]:checked').value==='sep';
+  return {ws,sep};
+}
+function schedHas(w){return SD.kind==='one'?schedRecs(SD.mode,SD.key,w).length>0:w.recs.length>0}
+function schedDlgSum(){
+  const wm=$('input[name=sw]:checked').value;$('#sdWeeks').classList.toggle('off',wm!=='pick');
+  const {ws,sep}=schedSel();const ok=ws.filter(schedHas);
+  $('#sdFiles').classList.toggle('off',ws.length<2);$('#sdFiles').querySelectorAll('input').forEach(x=>x.disabled=ws.length<2);
+  let t;
+  if(!ws.length) t='Выберите хотя бы одну неделю.';
+  else if(!ok.length) t=SD.kind==='one'?'В выбранные недели занятий нет.':'В выбранных неделях нет занятий.';
+  else{
+    const files=sep?ok.length:1;
+    t=`Будет выведено: ${ok.length} ${plural(ok.length,'неделя','недели','недель')} · ${files} ${plural(files,'файл','файла','файлов')}`;
+    if(ok.length<ws.length) t+=` · без занятий пропущено: ${ws.filter(w=>!schedHas(w)).map(wkName).join(', ')}`;
+  }
+  $('#sdSum').textContent=t;$('#sdGo').disabled=!ok.length;
+}
+function openSchedDlg(kind){
+  SD.kind=kind;SD.mode=kind==='one'?st.mode:'group';SD.key=kind==='one'?st.key[st.mode]:null;
+  const cw=W();
+  $('#sdTitle').textContent=kind==='one'?entTitle(SD.mode,SD.key):'Расписание всех групп';
+  $('#sdCurLabel').textContent='Текущая неделя ('+wkName(cw)+(cw.week&&fmtRange(cw)?', '+fmtRange(cw):'')+')';
+  const keys=new Set(SCHED.weeks.map(w=>w.key));SD.pick=new Set([...SD.pick].filter(k=>keys.has(k)));
+  if(!SD.pick.size) SD.pick.add(cw.key);
+  $('#sdWeeks').innerHTML=SCHED.weeks.map(w=>{const has=schedHas(w);
+    return `<label title="${esc(fmtRange(w))}"${has?'':' class="empty"'}><input type="checkbox" data-sw="${esc(w.key)}"${SD.pick.has(w.key)?' checked':''}> ${esc(wkName(w))}${w.week&&fmtRange(w)?` <small>${esc(fmtRange(w))}</small>`:''}${has?'':' <small>(пусто)</small>'}</label>`}).join('');
+  schedDlgSum();
+  $('#sdlg').hidden=false;document.body.classList.add('modal-open');$('#sdGo').focus();
+}
+function closeSchedDlg(){$('#sdlg').hidden=true;if($('#modal').hidden&&$('#zdlg').hidden) document.body.classList.remove('modal-open')}
+$('#sdlg').addEventListener('change',e=>{
+  const k=e.target.dataset.sw;if(k!=null){e.target.checked?SD.pick.add(k):SD.pick.delete(k);$('input[name=sw][value=pick]').checked=true}
+  schedDlgSum();
+});
+$('#sdlg').addEventListener('click',e=>{
+  if(e.target.closest('[data-sclose]')) return closeSchedDlg();
+  const all=e.target.closest('#sdAll'),none=e.target.closest('#sdNone');
+  if(all||none){e.preventDefault();SD.pick=new Set(all?SCHED.weeks.filter(schedHas).map(w=>w.key):[]);
+    $('#sdWeeks').querySelectorAll('[data-sw]').forEach(x=>x.checked=SD.pick.has(x.dataset.sw));
+    $('input[name=sw][value=pick]').checked=true;schedDlgSum()}
+});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#sdlg').hidden) closeSchedDlg()});
+$('#sdGo').addEventListener('click',async()=>{
+  const {ws,sep}=schedSel();const ok=ws.filter(schedHas);if(!ok.length) return;
+  const base=SD.kind==='one'?entTitle(SD.mode,SD.key):'Расписание всех групп';
+  closeSchedDlg();const btn=$('#pdfBtn');btn.disabled=true;btn.textContent='Готовлю PDF…';
+  try{
+    const files=sep?ok.map(w=>[baseDoc(true,schedWeekContent(w,false)),fname(`${base}, неделя ${wkName(w)}.pdf`)])
+      :[[baseDoc(true,ok.flatMap((w,i)=>schedWeekContent(w,i>0))),fname(`${base}, ${wksTitle(ok)}.pdf`)]];
+    await savePdfs(files);
+  }catch(err){toast(err&&err.message||'Не удалось сформировать PDF.',true)}
+  finally{btn.disabled=false;btn.textContent='PDF ▾'}
+});
 
 /* ---------- Печать зачётов: выбор групп и недель ---------- */
 const ZD={pick:new Set()};
@@ -1308,13 +1385,21 @@ function creditSel(){
   const weeks=wm==='sem'?null:wm==='cur'?(cw?[cw]:[]):[...ZD.pick].sort((a,b)=>a-b);
   let pages=gm==='one'?all.filter(([g])=>g===$('#zdGroup').value):all;
   if(weeks) pages=pages.map(([g,its])=>[g,its.filter(it=>weeks.includes(it.week))]).filter(x=>x[1].length);
-  return {pages,weeks,gm};
+  /* несколько недель: весь семестр или выбрано больше одной */
+  const multi=!weeks||weeks.length>1;
+  const sep=multi&&$('input[name=zfile]:checked').value==='sep';
+  return {pages,weeks,gm,sep};
 }
+/* недели, которые реально попадут в выборку, по возрастанию */
+const creditWeeks=pages=>[...new Set(pages.flatMap(([,its])=>its.map(it=>it.week)))].sort((a,b)=>a-b);
 function creditDlgSum(){
   const wm=$('input[name=zw]:checked').value;$('#zdWeeks').classList.toggle('off',wm!=='pick');
   $('#zdGroup').disabled=$('input[name=zg]:checked').value!=='one';
-  const {pages,weeks}=creditSel();const n=pages.reduce((a,[,its])=>a+its.length,0);
-  $('#zdSum').textContent=weeks&&!weeks.length?'Выберите хотя бы одну неделю.':n?`Будет выведено: ${n} ${plural(n,'зачёт','зачёта','зачётов')} · ${pages.length} ${plural(pages.length,'группа','группы','групп')}`:'Под выбранные условия зачётов нет.';
+  const {pages,weeks,sep}=creditSel();const n=pages.reduce((a,[,its])=>a+its.length,0);
+  const multi=!weeks||weeks.length>1;
+  $('#zdFiles').classList.toggle('off',!multi);$('#zdFiles').querySelectorAll('input').forEach(x=>x.disabled=!multi);
+  const files=sep?creditWeeks(pages).length:1;
+  $('#zdSum').textContent=weeks&&!weeks.length?'Выберите хотя бы одну неделю.':n?`Будет выведено: ${n} ${plural(n,'зачёт','зачёта','зачётов')} · ${pages.length} ${plural(pages.length,'группа','группы','групп')} · ${files} ${plural(files,'файл','файла','файлов')}`:'Под выбранные условия зачётов нет.';
   $('#zdGo').disabled=!n;
 }
 function openCreditDlg(){
@@ -1331,7 +1416,7 @@ function openCreditDlg(){
   creditDlgSum();
   $('#zdlg').hidden=false;document.body.classList.add('modal-open');$('#zdGo').focus();
 }
-function closeCreditDlg(){$('#zdlg').hidden=true;if($('#modal').hidden) document.body.classList.remove('modal-open')}
+function closeCreditDlg(){$('#zdlg').hidden=true;if($('#modal').hidden&&$('#sdlg').hidden) document.body.classList.remove('modal-open')}
 $('#zdlg').addEventListener('change',e=>{
   const w=e.target.dataset.zw;if(w){e.target.checked?ZD.pick.add(+w):ZD.pick.delete(+w);$('input[name=zw][value=pick]').checked=true}
   if(e.target.name==='zg') $('#zdBreak').checked=e.target.value==='all'&&$('input[name=zw]:checked').value==='sem';
@@ -1341,22 +1426,25 @@ $('#zdlg').addEventListener('change',e=>{
 $('#zdlg').addEventListener('click',e=>{if(e.target.closest('[data-zclose]')) closeCreditDlg()});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#zdlg').hidden) closeCreditDlg()});
 $('#zdGo').addEventListener('click',async()=>{
-  const {pages,weeks,gm}=creditSel();if(!pages.length) return;
-  const brk=$('#zdBreak').checked,period=weeks?'· '+wkList(weeks):'за семестр';
+  const {pages,weeks,gm,sep}=creditSel();if(!pages.length) return;
+  const brk=$('#zdBreak').checked,who=gm==='one'?pages[0][0]:'все группы';
+  const doc=(pp,period)=>baseDoc(false,pp.flatMap(([g,its],i)=>pdfCreditPage(g,its,brk,period,i===0,i===pp.length-1)));
   closeCreditDlg();const btn=$('#pdfBtn');btn.disabled=true;btn.textContent='Готовлю PDF…';
   try{
-    const content=pages.flatMap(([g,its],i)=>pdfCreditPage(g,its,brk,period,i===0,i===pages.length-1));
-    const name=`Зачёты — ${gm==='one'?pages[0][0]:'все группы'} — ${weeks?wkList(weeks):'семестр'}.pdf`.replace(/[\\/:*?"<>|]/g,'-');
-    await savePdf(baseDoc(false,content),name);
+    const files=sep?creditWeeks(pages).map(wk=>{
+        const pp=pages.map(([g,its])=>[g,its.filter(it=>it.week===wk)]).filter(x=>x[1].length);
+        return [doc(pp,'· '+wkList([wk])),fname(`Зачёты — ${who} — ${wkList([wk])}.pdf`)]})
+      :[[doc(pages,weeks?'· '+wkList(weeks):'за семестр'),fname(`Зачёты — ${who} — ${weeks?wkList(weeks):'семестр'}.pdf`)]];
+    await savePdfs(files);
   }catch(err){toast(err&&err.message||'Не удалось сформировать PDF.',true)}
   finally{btn.disabled=false;btn.textContent='PDF ▾'}
 });
 function updatePdfMenu(){
   const w=W(),key=st.key[st.mode];
   const one=$('#pdf-one'),all=$('#pdf-all'),z=$('#pdf-zach');
-  $('#pdfOneLabel').textContent=key&&key!=='*'?entTitle(st.mode,key):'Открытое расписание';
-  $('#pdfOneSub').textContent=w?'неделя '+(w.week||'')+', одна страница':'нужен файл расписания';
-  $('#pdfAllSub').textContent=w?'неделя '+(w.week||'')+', каждая группа на отдельной странице':'нужен файл расписания';
+  $('#pdfOneLabel').textContent=(key&&key!=='*'?entTitle(st.mode,key):'Открытое расписание')+'…';
+  $('#pdfOneSub').textContent=w?'текущая неделя ('+wkName(w)+') или выбрать недели':'нужен файл расписания';
+  $('#pdfAllSub').textContent=w?'каждая группа на отдельной странице, недели на выбор':'нужен файл расписания';
   one.disabled=!w||key==null||key==='*';all.disabled=!w;z.disabled=!PLAN||!FLAGS.size;
 }
 $('#pdfBtn').addEventListener('click',e=>{e.stopPropagation();const m=$('#pdfMenu');updatePdfMenu();m.hidden=!m.hidden;$('#pdfBtn').setAttribute('aria-expanded',String(!m.hidden))});
