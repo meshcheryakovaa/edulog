@@ -227,8 +227,8 @@ const fmtRange=w=>w.start||w.end?`${(w.start||'').slice(0,5).replace(/-/g,'.')}�
    «отменено» (занятие пропало) или «изменено». */
 const CHMEMO=new Map();
 function itemHas(mode,key,it){
-  if(mode==='teacher') return it.t.some(n=>{const t=tparse(n);return t&&t.key===key});
-  if(mode==='room') return it.r.includes(key);
+  if(mode==='teacher'){const c=tC(key);return it.t.some(n=>{const t=tparse(n);return t&&tC(t.key)===c})}
+  if(mode==='room'){const c=rC(key);return it.r.some(r=>rC(r)===c)}
   return true;
 }
 function relChange(c,mode,key){
@@ -255,8 +255,8 @@ function entityChanges(mode,key,onlyWeek){
 /* перенос зачёта как строка таблицы изменений */
 function zHas(m,mode,key){
   if(mode==='group') return m.g===key;
-  if(mode==='teacher') return [...m.from.t,...m.to.t].includes(key);
-  return [...m.from.r,...m.to.r].includes(key);
+  if(mode==='teacher') return [...m.from.t,...m.to.t].some(t=>tC(t)===tC(key));
+  return [...m.from.r,...m.to.r].some(r=>rC(r)===rC(key));
 }
 function zRow(e,m,ei){
   const at=m.to.d?m.to:m.from;
@@ -276,7 +276,7 @@ function weekUnseen(wk){
 /* кто затронут: множества групп, преподавателей и аудиторий */
 function touched(list){
   const T={group:new Set(),teacher:new Set(),room:new Set()};
-  for(const c of list){T.group.add(c.g);for(const it of [...c.b,...c.a]){it.t.forEach(n=>{const t=tparse(n);if(t) T.teacher.add(t.key)});it.r.forEach(r=>T.room.add(r))}}
+  for(const c of list){T.group.add(c.g);for(const it of [...c.b,...c.a]){it.t.forEach(n=>{const t=tparse(n);if(t) T.teacher.add(tC(t.key))});it.r.forEach(r=>T.room.add(rC(r)))}}
   return T;
 }
 function touchedFor(view){
@@ -287,7 +287,7 @@ function touchedFor(view){
       // «изм.» — только пока на этой неделе есть непросмотренное
       const w=W();const T={group:new Set(),teacher:new Set(),room:new Set()};
       if(w) for(const r of weekUnseen(w.key)){
-        if(r.m){T.group.add(r.m.g);[...r.m.from.t,...r.m.to.t].forEach(t=>T.teacher.add(t));[...r.m.from.r,...r.m.to.r].forEach(x=>T.room.add(x))}
+        if(r.m){T.group.add(r.m.g);[...r.m.from.t,...r.m.to.t].forEach(t=>T.teacher.add(tC(t)));[...r.m.from.r,...r.m.to.r].forEach(x=>T.room.add(rC(x)))}
         else{const t=touched([r.c]);for(const md of ['group','teacher','room']) t[md].forEach(x=>T[md].add(x))}
       }
       CHMEMO.set(k,T);return T;
@@ -353,6 +353,38 @@ const tShow=k=>NAMES.teacher.get(k)||tName(k);
 const gShow=k=>NAMES.group.get(k)||k;
 const rShow=k=>NAMES.room.get(k)||k;
 const tShowRaw=n=>{const t=tparse(n);return t?tShow(t.key):n};
+/* ---------- Объединение по короткому названию ----------
+   Преподаватели (и аудитории), у которых на экране одно и то же название — потому что в словаре
+   им задано одинаковое короткое, — в расписании одна сущность: один пункт в списке, один столбец
+   сводной таблицы, общие занятия в ячейке и общие накладки. Ключ объединённой — первый по порядку
+   из истинных; истинные названия видны в подсказке и в PDF. Группы и дисциплины не объединяются. */
+let ALIAS={v:null,ver:-1,teacher:new Map(),room:new Map(),mem:{teacher:new Map(),room:new Map()}};
+function aliases(){
+  if(ALIAS.ver===FVER&&ALIAS.v===REG.rooms&&ALIAS.vt===REG.teachers) return ALIAS;
+  const A={v:REG.rooms,vt:REG.teachers,ver:FVER,teacher:new Map(),room:new Map(),mem:{teacher:new Map(),room:new Map()}};
+  const run=(kind,keys,shown,cmp)=>{
+    const by=new Map();
+    for(const k of keys){const l=lc(shown(k)).trim();(by.get(l)||by.set(l,[]).get(l)).push(k)}
+    for(const ks of by.values()){
+      // объединяем, только если хотя бы одному задано короткое название в словаре
+      if(ks.length<2||!ks.some(k=>NAMES[kind].has(k))) continue;
+      ks.sort(cmp);const rep=ks[0];A.mem[kind].set(rep,ks);for(const k of ks) A[kind].set(k,rep);
+    }
+  };
+  run('teacher',[...REG.teachers.keys()],tShow,(a,b)=>coll.compare(tName(a),tName(b)));
+  run('room',REG.rooms,rShow,cmpRooms);
+  ALIAS=A;return A;
+}
+// ключ сущности с учётом объединения; для групп — как есть
+const canon=(mode,k)=>mode==='teacher'||mode==='room'?(k==null?k:aliases()[mode].get(k)||k):k;
+const tC=k=>canon('teacher',k),rC=k=>canon('room',k);
+// все истинные ключи, вошедшие в сущность
+const members=(mode,k)=>mode==='teacher'||mode==='room'?aliases().mem[mode].get(canon(mode,k))||[k]:[k];
+const merged=(mode,k)=>members(mode,k).length>1;
+// без повторов одной и той же сущности (43 Мещеряков и 43 Прилепов → один «каб. 43»)
+const uniqT=ts=>{const s=new Set();return ts.filter(t=>{const c=tC(t.key);if(s.has(c)) return false;s.add(c);return true})};
+const uniqR=rs=>{const s=new Set();return rs.filter(r=>{const c=rC(r);if(s.has(c)) return false;s.add(c);return true})};
+const uniqStr=a=>[...new Set(a)];
 // title с истинным названием, если на экране короткое
 const tip=(shown,full)=>shown!==full?` title="${esc(full)}"`:'';
 const propOrder=(a,b)=>a.sort-b.sort||coll.compare(a.name,b.name);
@@ -435,23 +467,23 @@ function collect(pred){
 }
 function planRows(mode,key){
   if(mode==='group'){const g=planGroup(key);return g?g.rows.map(r=>({...r,groups:[g.name]})):[]}
-  if(mode==='teacher') return collect(r=>tk(r)===key);
-  return collect(r=>r.room===key);
+  if(mode==='teacher'){const c=tC(key);return collect(r=>!!r.t&&tC(tk(r))===c)}
+  {const c=rC(key);return collect(r=>!!r.room&&rC(r.room)===c)}
 }
 
 /* ---------- Выборки по расписанию ---------- */
 function schedRecs(mode,key,w){
   if(!w) return [];
   if(mode==='group') return w.recs.filter(r=>r.group===key);
-  if(mode==='teacher') return w.recs.filter(r=>r.teachers.some(t=>t.key===key));
-  return w.recs.filter(r=>r.rooms.includes(key));
+  if(mode==='teacher'){const c=tC(key);return w.recs.filter(r=>r.teachers.some(t=>tC(t.key)===c))}
+  {const c=rC(key);return w.recs.filter(r=>r.rooms.some(x=>rC(x)===c))}
 }
 /* одинаковое занятие у нескольких групп (поток) — одна карточка */
 function cards(recs,mode){
   const Z=ZS();
   if(mode==='group') return recs.map(r=>({...r,groups:[r.group],zach:Z.has(r)}));
   const m=new Map(),out=[];
-  for(const r of recs){const k=[r.day,r.period,r.subject,r.rooms.join(','),r.teachers.map(t=>t.key).join(',')].join('|');
+  for(const r of recs){const k=[r.day,r.period,r.subject,uniqStr(r.rooms.map(rC)).join(','),uniqStr(r.teachers.map(t=>tC(t.key))).join(',')].join('|');
     if(m.has(k)){const c=m.get(k);if(!c.groups.includes(r.group)) c.groups.push(r.group);if(Z.has(r)) c.zach=true;continue}
     const c={...r,groups:[r.group],zach:Z.has(r)};m.set(k,c);out.push(c)}
   return out;
@@ -460,6 +492,8 @@ const slotKey=r=>r.day+'|'+r.period;
 const slots=recs=>new Set(recs.map(slotKey)).size;
 function gaps(recs){let n=0;for(let d=1;d<=6;d++){const ps=[...new Set(recs.filter(r=>r.day===d).map(r=>r.period))].sort((a,b)=>a-b);
   if(ps.length>1) n+=ps[ps.length-1]-ps[0]+1-ps.length}return n}
+// аудитория с номером: занятия в ней одновременно — накладка (по истинному или короткому названию)
+const numRoom=k=>/^\d/.test(k)||/^\d/.test(rShow(k));
 /* накладки: преподаватель в двух местах, аудитория (с номером) занята разными занятиями, у группы общее занятие совпало с другим */
 function markConflicts(cs,mode,key){
   const by=new Map();cs.forEach(c=>{const k=slotKey(c);(by.get(k)||by.set(k,[]).get(k)).push(c)});
@@ -468,7 +502,7 @@ function markConflicts(cs,mode,key){
     if(list.length<2) continue;
     let bad=false;
     if(mode==='teacher') bad=key!=='вакант';
-    else if(mode==='room') bad=/^\d/.test(key);
+    else if(mode==='room') bad=numRoom(key);
     else bad=list.some(c=>c.subgroup===0);
     if(bad){n++;list.forEach(c=>c.conf=true)}
   }
@@ -486,20 +520,21 @@ function recon(mode,key,w){
   if(!PLAN||!w||!w.week) return null;
   const i=w.week-1;const B=new Map();
   const get=(k,init)=>B.get(k)||B.set(k,{...init,plan:0,fact:0}).get(k);
+  const isK=k=>!!k&&tC(k)===tC(key);
   const gnames=mode==='group'?[key]:[...new Set([
-    ...PLAN.groups.filter(g=>g.rows.some(r=>tk(r)===key)).map(g=>g.name),
-    ...w.recs.filter(r=>r.teachers.some(t=>t.key===key)).map(r=>r.group)])];
+    ...PLAN.groups.filter(g=>g.rows.some(r=>isK(tk(r)))).map(g=>g.name),
+    ...w.recs.filter(r=>r.teachers.some(t=>isK(t.key))).map(r=>r.group)])];
   for(const gn of gnames){
     const pg=planGroup(gn);
     if(pg) for(const r of pg.rows){
-      if(mode!=='group'&&tk(r)!==key) continue;
+      if(mode!=='group'&&!isK(tk(r))) continue;
       const v=r.weeks[i]||0;
       const b=get(gn+'#'+reconKey(r.disc,r.t&&r.t.bkey),{group:gn,name:r.disc,tkey:tk(r),inPlan:true});
       b.plan+=v;b.inPlan=true;
     }
     for(const x of w.recs){
       if(x.group!==gn) continue;
-      const t=mode==='group'?x.teachers[0]:x.teachers.find(t=>t.key===key);
+      const t=mode==='group'?x.teachers[0]:x.teachers.find(t=>isK(t.key));
       if(mode!=='group'&&!t) continue;
       const b=get(gn+'#'+reconKey(x.subject,t&&t.bkey),{group:gn,name:x.subject,tkey:t?t.key:''});
       b.fact++;if(!b.full) b.full=x.subject;if(!b.tkey&&t) b.tkey=t.key;
@@ -512,7 +547,7 @@ function recon(mode,key,w){
 function planPairs(mode,key,w){
   if(!PLAN||!w||!w.week) return null;const i=w.week-1;
   if(mode==='group'){const g=planGroup(key);if(!g) return null;return g.totals?g.totals[i]||0:g.rows.reduce((a,r)=>a+(r.weeks[i]||0),0)}
-  if(mode==='teacher'){const rs=collect(r=>tk(r)===key);return rs.length?rs.reduce((a,r)=>a+(r.weeks[i]||0),0):null}
+  if(mode==='teacher'){const rs=planRows('teacher',key);return rs.length?rs.reduce((a,r)=>a+(r.weeks[i]||0),0):null}
   return null;
 }
 
@@ -630,7 +665,7 @@ function zSyncLocal(){
 function items(mode){
   if(st.view==='changes'){
     const C=changeCounts()[mode];const lab=k=>label(mode,k);
-    const keys=mode==='group'?REG.groups:mode==='teacher'?[...REG.teachers.keys()]:REG.rooms;
+    const keys=mode==='group'?REG.groups:uniqStr((mode==='teacher'?[...REG.teachers.keys()]:REG.rooms).map(k=>canon(mode,k)));
     const list=keys.map(k=>{const n=C.get(k)||0;return {key:k,label:lab(k),present:n>0,n:n?n+' '+plural(n,'изм.','изм.','изм.'):'—'}});
     if(mode==='group') list.forEach(i=>{const c=REG.courses[i.key];i.sec=c?c+' курс':'Шифр …'+i.key.slice(-2);i.secO=c?c:100+(99-(+i.key.slice(-2)||0))});
     return mode==='room'?list:list.sort((a,b)=>coll.compare(a.label,b.label));
@@ -638,12 +673,12 @@ function items(mode){
   const plan=st.view==='plan', w=W();
   const ALL={key:'*',label:ALL_NAME[mode],all:true,present:true,n:'',sec:'',secO:-1};
   if(mode==='group'){const l=REG.groups.map(n=>groupItem(n,plan,w)).sort((a,b)=>a.secO-b.secO||coll.compare(a.label,b.label));if(!plan&&SCHED) l.unshift(ALL);return l}
-  if(mode==='teacher'){const l=[...REG.teachers.values()].map(e=>{const k=e.key;
+  if(mode==='teacher'){const l=[...REG.teachers.keys()].filter(k=>tC(k)===k).map(k=>{
     if(plan){const rs=planRows('teacher',k);return {key:k,label:tShow(k),present:rs.length>0,n:rs.length?rs.reduce((a,r)=>a+r.hours,0)+' ч':'—'}}
     const rs=schedRecs('teacher',k,w);const s=slots(rs);const p=planPairs('teacher',k,w);
     return {key:k,label:tShow(k),present:rs.length>0,n:s+' '+plural(s,'пара','пары','пар'),dot:!PLAN?'':(p==null&&!s?'none':((p||0)===s?'ok':'warn'))};
   }).sort((a,b)=>coll.compare(a.label,b.label));if(!plan&&SCHED) l.unshift(ALL);return l}
-  const list=REG.rooms.map(k=>{
+  const list=REG.rooms.filter(k=>rC(k)===k).map(k=>{
     if(plan){const rs=planRows('room',k);return {key:k,label:rShow(k),present:rs.length>0,n:rs.length?rs.reduce((a,r)=>a+r.hours,0)+' ч':'—'}}
     const rs=schedRecs('room',k,w);const s=slots(rs);return {key:k,label:rShow(k),present:rs.length>0,n:s+' '+plural(s,'пара','пары','пар')};
   });
@@ -658,6 +693,7 @@ function groupItem(n,plan,w){
     return {key:n,label:gShow(n),sec,secO,present:rs.length>0,n:s+' '+plural(s,'пара','пары','пар'),dot:p==null?'none':(p===s?'ok':'warn')};
 }
 function resolveKey(list){
+  if(st.key[st.mode]!=null&&st.key[st.mode]!=='*') st.key[st.mode]=canon(st.mode,st.key[st.mode]);
   const k=st.key[st.mode];
   if(list.some(i=>i.key===k&&(i.present||i.all))) return k;
   if(k!=null&&list.some(i=>i.key===k)) return k;      // выбранный есть в справочнике, но не в этом источнике — покажем пусто
@@ -693,7 +729,8 @@ function renderTabs(){
 const ALL_NAME={group:'Все группы',teacher:'Все преподаватели',room:'Все аудитории'};
 const MODE_NAME={group:'группы',teacher:'преподавателя',room:'аудитории'};
 const label=(mode,key)=>mode==='teacher'?tShow(key):mode==='group'?gShow(key):rShow(key);
-const fullLabel=(mode,key)=>mode==='teacher'?tName(key):String(key);
+// истинное название; у объединённых — все истинные через запятую
+const fullLabel=(mode,key)=>members(mode,key).map(k=>mode==='teacher'?tName(k):String(k)).join(', ');
 function titleRow(key){
   const ps=LIST.filter(i=>i.present&&!i.all);const idx=ps.findIndex(i=>i.key===key);
   const dis=ps.length<2?' disabled':'';
@@ -786,12 +823,20 @@ let ZROWS=[],PROWS=[];
 /* ---------- Вид «Расписание» ---------- */
 const linkT=t=>VIEW_ONLY?`<span${tip(tShow(t.key),tName(t.key))}>${esc(tShow(t.key))}</span>`:`<button class="link" data-go="teacher" data-key="${esc(t.key)}"${tip(tShow(t.key),tName(t.key))}>${esc(tShow(t.key))}</button>`;
 const linkR=r=>VIEW_ONLY?`<span${tip(rShow(r),r)}>${esc(rShow(r))}</span>`:`<button class="link" data-go="room" data-key="${esc(r)}"${tip(rShow(r),r)}>${esc(rShow(r))}</button>`;
+/* у объединённой сущности — из какой исходной аудитории (преподавателя) занятие */
+function origOf(c,mode,key){
+  if(!merged(mode,key)) return '';const m=new Set(members(mode,key));
+  const xs=mode==='room'?c.rooms.filter(r=>m.has(r)):c.teachers.map(t=>t.key).filter(k=>m.has(k)).map(tName);
+  return uniqStr(xs).join(', ');
+}
+const markOrig=(cs,mode,key)=>{if(merged(mode,key)) cs.forEach(c=>{c.orig=origOf(c,mode,key)})};
 const linkG=g=>`<button class="link" data-go="group" data-key="${esc(g)}"${tip(gShow(g),g)}>${esc(gShow(g))}</button>`;
 function lessonCard(c,mode,w,compact){
   const tm=w.times[c.period]||['',''];
   const odd=c.start&&(c.start!==tm[0]||c.end!==tm[1])?`<span class="tag warn" title="Время отличается от обычного для этой пары">${esc(c.start)}–${esc(c.end)}</span>`:'';
   const sg=c.subgroup?`<span class="tag">${c.subgroup<=2?c.subgroup+' п/г':'п/г '+c.subgroup}</span>`:'';
-  const T=c.teachers.length?c.teachers.map(linkT).join(', '):'—', R=c.rooms.length?c.rooms.map(linkR).join(', '):'—';
+  const T=c.teachers.length?uniqT(c.teachers).map(linkT).join(', '):'—', R=c.rooms.length?uniqR(c.rooms).map(linkR).join(', '):'—';
+  const og=c.orig?`<span class="tag orig" title="Истинное название в исходном расписании">${esc(c.orig)}</span>`:'';
   const cls='ls'+(c.subgroup?' sub':'')+(c.conf?' conf':'')+(c.zach?' zach':'')+(c.chg?' ch-'+c.chg:'')+(compact?' compact':'');
   const was=c.was&&c.was.length?' Было: '+c.was.map(it=>[it.s,it.t.join(', '),it.r.join(', '),it.tm].filter(Boolean).join(' · ')).join('; '):'';
   const zt=(c.zach?'<span class="ztag" title="Последняя пара зачётной дисциплины">Зачёт</span>':'')+
@@ -800,7 +845,7 @@ function lessonCard(c,mode,w,compact){
   if(mode==='group') return `<div class="${cls}">${zt}<div class="ls-s" title="${esc(c.subject)}">${esc(dShow(c.subject))}</div><div class="ls-m">${T}<span>${R}</span>${sg}${odd}${conf}</div></div>`;
   const grp=`<div class="ls-g">${c.groups.map(linkG).join('')}</div>`;
   const other=mode==='teacher'?R:T;
-  return `<div class="${cls}">${zt}${grp}<div class="ls-s" title="${esc(c.subject)}">${esc(dShow(c.subject))}</div><div class="ls-m"><span>${other}</span>${sg}${odd}${conf}</div></div>`;
+  return `<div class="${cls}">${zt}${grp}<div class="ls-s" title="${esc(c.subject)}">${esc(dShow(c.subject))}</div><div class="ls-m"><span>${other}</span>${og}${sg}${odd}${conf}</div></div>`;
 }
 /* Ячейка пары: занятие всей группы — на всю ширину, 1 подгруппа — левая половина, 2 подгруппа — правая.
    Если занята только одна подгруппа, вторая половина остаётся пустой. */
@@ -852,7 +897,7 @@ function renderSched(key){
   const w=W();const mode=st.mode;
   if(key==='*') return renderGrid(w,mode);
   if(key==null) return main.innerHTML=`<div class="head">${weekNav(w)}</div>`+emptyCard('Список пуст','В расписании нет записей для этого раздела.');
-  const recs=schedRecs(mode,key,w);const cs=cards(recs,mode);const conf=markConflicts(cs,mode,key);
+  const recs=schedRecs(mode,key,w);const cs=cards(recs,mode);markOrig(cs,mode,key);const conf=markConflicts(cs,mode,key);
   const ghosts=markChanges(cs,mode,key,w);const chn=cs.filter(c=>c.chg).length+ghosts.length;
   const s=slots(recs),g=gaps(recs);const pp=VIEW_ONLY?null:planPairs(mode,key,w);
   const days=new Set(recs.map(r=>r.day)).size;
@@ -888,7 +933,7 @@ function saveCols(){
 const colsOwn=mode=>!!(COLS[mode]&&(COLS[mode].o.length||COLS[mode].h.length));
 function applyColOrd(mode,cols){
   const o=(COLS[mode]&&COLS[mode].o)||[];if(!o.length) return cols;
-  const ix=new Map(o.map((k,i)=>[k,i]));
+  const ix=new Map();o.forEach((k,i)=>{k=canon(mode,k);if(!ix.has(k)) ix.set(k,i)});
   // новых в сохранённом порядке нет — они идут в конце, в обычном порядке
   return cols.map((k,i)=>[k,ix.has(k)?ix.get(k):1e6+i]).sort((a,b)=>a[1]-b[1]).map(x=>x[0]);
 }
@@ -897,7 +942,7 @@ function moveCol(mode,all,from,to){
   const a=all.slice();const i=a.indexOf(from);if(i<0) return;a.splice(i,1);
   let j=to==null?a.length:a.indexOf(to);if(j<0) j=a.length;a.splice(j,0,from);colCfg(mode).o=a;saveCols();render();
 }
-function hideCol(mode,k,on){const c=colCfg(mode);c.h=c.h.filter(x=>x!==k);if(on) c.h.push(k);saveCols();render()}
+function hideCol(mode,k,on){const c=colCfg(mode);c.h=c.h.filter(x=>canon(mode,x)!==k);if(on) c.h.push(k);saveCols();render()}
 let GRIDALL=[];
 function colLabel(mode,k){return mode==='group'?gShow(k):mode==='teacher'?tShow(k):rShow(k)}
 function userName(){const n=window.EduLOGCloud&&window.EduLOGCloud.userName&&window.EduLOGCloud.userName();return n||''}
@@ -912,7 +957,7 @@ function colBar(mode,all,hidden){
 /* сводная таблица недели: столбцы — все группы / преподаватели / аудитории, строки — пары по дням */
 function renderGrid(w,mode){
   const cs=cards(w.recs,mode);
-  const keysOf=c=>mode==='group'?c.groups:mode==='teacher'?c.teachers.map(t=>t.key):c.rooms;
+  const keysOf=c=>mode==='group'?c.groups:mode==='teacher'?uniqStr(c.teachers.map(t=>tC(t.key))):uniqStr(c.rooms.map(rC));
   const cell=new Map();
   cs.forEach(c=>keysOf(c).forEach(k=>{const id=k+'|'+c.day+'|'+c.period;(cell.get(id)||cell.set(id,[]).get(id)).push(c)}));
   let cols=[...new Set(cs.flatMap(keysOf))];
@@ -920,7 +965,7 @@ function renderGrid(w,mode){
   else if(mode==='teacher') cols.sort((a,b)=>coll.compare(tShow(a),tShow(b)));
   else cols.sort(cmpRooms);
   cols=applyColOrd(mode,cols);GRIDALL=cols;
-  const hidden=cols.filter(k=>colCfg(mode).h.includes(k));const isOff=k=>hidden.includes(k);if(!st.colEdit) cols=cols.filter(k=>!isOff(k));
+  const hs=new Set(colCfg(mode).h.map(k=>canon(mode,k)));const hidden=cols.filter(k=>hs.has(k));const isOff=k=>hidden.includes(k);if(!st.colEdit) cols=cols.filter(k=>!isOff(k));
   const days=[...new Set(w.recs.map(r=>r.day))].sort((a,b)=>a-b);
   // «Новое», «Изменено», «Отменено» — непросмотренные изменения недели, как в расписании одного
   const ghost=new Map();
@@ -929,21 +974,22 @@ function renderGrid(w,mode){
   const clash=(its,k)=>{
     if(its.length<2) return false;
     if(mode==='group'){const sg=its.map(c=>c.subgroup||0);return sg.includes(0)||new Set(sg).size<sg.length}
-    if(mode==='room') return /^\d/.test(k);
+    if(mode==='room') return numRoom(k);
     return true;
   };
   const tz=c=>(c.zach?'<span class="ctag z" title="Последняя пара зачётной дисциплины">Зачёт</span>':'')+
     (c.chg?`<span class="ctag ${c.chg}" title="${esc((c.chg==='add'?'Добавлено':'Изменено')+' — изменение ещё не просмотрено.'+(c.was&&c.was.length?' Было: '+c.was.map(it=>[it.s,it.t.join(', '),it.r.join(', '),it.tm].filter(Boolean).join(' · ')).join('; '):''))}">${c.chg==='add'?'Новое':'Изменено'}</span>`:'');
-  const gone=g=>{const it=g.it,T=it.t.map(tShowRaw).join(', '),R=it.r.map(rShow).join(', ');
+  const gone=g=>{const it=g.it,T=uniqStr(it.t.map(tShowRaw)).join(', '),R=uniqStr(it.r.map(rShow)).join(', ');
     const meta=mode==='group'?[T,R]:mode==='teacher'?[gShow(g.group),R]:[gShow(g.group),T];
     return `<div class="occ gone" title="Отменено — изменение ещё не просмотрено"><span class="ctag del">Отменено</span><span class="s" title="${esc(it.s)}">${esc(dShow(it.s))}</span><small>${esc(meta.filter(Boolean).join(' · ')||'—')}${g.subgroup?' · '+sgText(g.subgroup):''}</small></div>`};
-  const occ=c=>{
-    const T=c.teachers.map(t=>linkT(t)).join(', '),R=c.rooms.map(linkR).join(', '),G=c.groups.map(linkG).join(', ');
+  const occ=(c,k)=>{
+    const T=uniqT(c.teachers).map(t=>linkT(t)).join(', '),R=uniqR(c.rooms).map(linkR).join(', '),G=c.groups.map(linkG).join(', ');
+    const o=mode!=='group'?origOf(c,mode,k):'',og=o?` <span class="tag orig" title="Истинное название в исходном расписании">${esc(o)}</span>`:'';
     const S=`<span class="s" title="${esc(c.subject)}">${esc(dShow(c.subject))}</span>`;
     const sg=c.subgroup?`<span class="tag">${sgText(c.subgroup)}</span>`:'';
     if(mode==='group') return `<div class="occ">${tz(c)}${S}<small>${T||'—'}${R?' · '+R:''} ${sg}</small></div>`;
-    if(mode==='teacher') return `<div class="occ">${tz(c)}<span class="g">${G} ${sg}</span>${S}<small>${R||'—'}</small></div>`;
-    return `<div class="occ">${tz(c)}<span class="g">${G} ${sg}</span><small>${T||'—'}</small></div>`;
+    if(mode==='teacher') return `<div class="occ">${tz(c)}<span class="g">${G} ${sg}</span>${S}<small>${R||'—'}${og}</small></div>`;
+    return `<div class="occ">${tz(c)}<span class="g">${G} ${sg}</span><small>${T||'—'}${og}</small></div>`;
   };
   const EYE='<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
   const EYE_OFF='<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.6 5.1A10.4 10.4 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6A17.4 17.4 0 0 0 2 12s3.6 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="M2 2l20 20"/></svg>';
@@ -956,15 +1002,15 @@ function renderGrid(w,mode){
     // у группы 1 и 2 подгруппа — рядом, как в карточках
     if(mode==='group'&&!bad&&its.every(c=>c.subgroup)){
       const by=n=>its.filter(c=>c.subgroup===n);
-      return `<td class="busy"><div class="sgs"><div>${by(1).map(occ).join('')}</div><div>${its.filter(c=>c.subgroup!==1).map(occ).join('')}</div></div>${gs}</td>`;
+      return `<td class="busy"><div class="sgs"><div>${by(1).map(c=>occ(c,k)).join('')}</div><div>${its.filter(c=>c.subgroup!==1).map(c=>occ(c,k)).join('')}</div></div>${gs}</td>`;
     }
-    return `<td class="${bad?'conf':'busy'}">${its.map(occ).join('')}${gs}</td>`;
+    return `<td class="${bad?'conf':'busy'}">${its.map(c=>occ(c,k)).join('')}${gs}</td>`;
   };
   const ctl=k=>{if(!st.colEdit) return '';const i=cols.indexOf(k);
     return `<div class="co-ctl"><button class="arrow xs" data-colmv="-1" data-k="${esc(k)}" aria-label="Левее"${i?'':' disabled'}>←</button><button class="arrow xs eye${isOff(k)?' is-off':''}" data-colhide="${esc(k)}" aria-pressed="${!isOff(k)}" aria-label="${isOff(k)?'Показать столбец':'Скрыть столбец'}" title="${isOff(k)?'Не видно — показать':'Видно — скрыть'}">${isOff(k)?EYE_OFF:EYE}</button><button class="arrow xs" data-colmv="1" data-k="${esc(k)}" aria-label="Правее"${i<cols.length-1?'':' disabled'}>→</button></div>`};
   const headCell=k=>{
-    if(mode==='room'){const p=NAMES.room.has(k)?{code:rShow(k),owner:''}:roomParts(k);return `<th scope="col" draggable="true" data-col="${esc(k)}"${isOff(k)?' class="off"':''}>${ctl(k)}<button class="link" data-go="room" data-key="${esc(k)}" title="${esc(k)}"><b>${esc(p.code)}</b></button>${p.owner?`<small>${esc(p.owner)}</small>`:''}</th>`}
-    if(mode==='teacher') return `<th scope="col" draggable="true" data-col="${esc(k)}"${isOff(k)?' class="off"':''}>${ctl(k)}<button class="link" data-go="teacher" data-key="${esc(k)}" title="${esc(tName(k))}"><b>${esc(tShow(k))}</b></button></th>`;
+    if(mode==='room'){const p=NAMES.room.has(k)?{code:rShow(k),owner:''}:roomParts(k);return `<th scope="col" draggable="true" data-col="${esc(k)}"${isOff(k)?' class="off"':''}>${ctl(k)}<button class="link" data-go="room" data-key="${esc(k)}" title="${esc(fullLabel('room',k))}"><b>${esc(p.code)}</b></button>${p.owner?`<small>${esc(p.owner)}</small>`:''}</th>`}
+    if(mode==='teacher') return `<th scope="col" draggable="true" data-col="${esc(k)}"${isOff(k)?' class="off"':''}>${ctl(k)}<button class="link" data-go="teacher" data-key="${esc(k)}" title="${esc(fullLabel('teacher',k))}"><b>${esc(tShow(k))}</b></button></th>`;
     return `<th scope="col" draggable="true" data-col="${esc(k)}"${isOff(k)?' class="off"':''}>${ctl(k)}<button class="link" data-go="group" data-key="${esc(k)}" title="${esc(k)}"><b>${esc(gShow(k))}</b></button></th>`;
   };
   // у групп над шапкой — строка курсов
@@ -1117,7 +1163,7 @@ function changeCounts(){
   if(SCHED) for(const e of SCHED.history) for(const w of e.weeks){if(w.st!=='upd') continue;
     for(const c of e.ch[w.k]||[]){const T=touched([c]);for(const md of ['group','teacher','room']) for(const k of T[md]) m[md].set(k,(m[md].get(k)||0)+1)}}
   if(SCHED) for(const e of SCHED.history) for(const z of e.z||[]){
-    const T={group:new Set([z.g]),teacher:new Set([...z.from.t,...z.to.t]),room:new Set([...z.from.r,...z.to.r])};
+    const T={group:new Set([z.g]),teacher:new Set([...z.from.t,...z.to.t].map(tC)),room:new Set([...z.from.r,...z.to.r].map(rC))};
     for(const md of ['group','teacher','room']) for(const k of T[md]) m[md].set(k,(m[md].get(k)||0)+1)}
   CNT={v:FVER,m};return m;
 }
@@ -1168,13 +1214,15 @@ function renderChanges(key){
 }
 
 /* ---------- Вид «Словари» ---------- */
+// с кем объединено в расписании из-за одинакового короткого названия
+const mergedMeta=(kind,k)=>merged(kind,k)?'вместе с: '+members(kind,k).filter(x=>x!==k).map(x=>kind==='teacher'?tName(x):x).join(', '):'';
 const DICT_MAX=500;
 function dictEntries(kind){
   let list;
   if(kind==='disc') list=[...DCAT.values()].map(e=>({key:e.key,full:e.key,meta:[e.src.has('plan')?'план':'',e.src.has('sched')?'расписание':''].filter(Boolean).join(', ')+(e.groups.size?` · ${e.groups.size} ${plural(e.groups.size,'группа','группы','групп')}`:'')}));
-  else if(kind==='teacher') list=[...REG.teachers.keys()].map(k=>({key:k,full:tName(k),meta:''}));
+  else if(kind==='teacher') list=[...REG.teachers.keys()].map(k=>({key:k,full:tName(k),meta:mergedMeta('teacher',k)}));
   else if(kind==='group') list=REG.groups.map(k=>({key:k,full:k,meta:REG.courses[k]?REG.courses[k]+' курс':''}));
-  else list=REG.rooms.map(k=>({key:k,full:k,meta:''}));
+  else list=REG.rooms.map(k=>({key:k,full:k,meta:mergedMeta('room',k)}));
   list.sort((a,b)=>coll.compare(a.full,b.full));
   // короткие названия для того, чего нет в открытых файлах, не теряются — их видно и можно убрать
   const have=new Set(list.map(e=>e.key));
@@ -1216,7 +1264,7 @@ function renderDict(){
       room:'Например, «15» вместо «15 Михайличенко».'}[t];
     body=`<section class="panel"><div class="dict-tools"><input type="search" id="dq" placeholder="Поиск по истинному или короткому названию" value="${esc(st.dq)}" autocomplete="off" aria-label="Поиск в словаре">
       <label class="rc-tools"><input type="checkbox" id="donly"${st.donly?' checked':''}> только с коротким названием</label><span class="sp"></span><span class="d-meta" id="dcount"></span></div>
-      <div class="rc-wrap"><table class="rc dict-t"><thead><tr><th>Истинное название</th><th>Короткое название (на экране)</th><th>${t==='disc'?'Где встречается':t==='group'?'Курс':''}</th></tr></thead><tbody id="dbody"></tbody></table></div>
+      <div class="rc-wrap"><table class="rc dict-t"><thead><tr><th>Истинное название</th><th>Короткое название (на экране)</th><th>${t==='disc'?'Где встречается':t==='group'?'Курс':'В расписании'}</th></tr></thead><tbody id="dbody"></tbody></table></div>
       <p class="note">${hint} Пустое поле — показывается истинное название. Истинное остаётся во всплывающей подсказке, в PDF и в файлах.${CLOUD&&!canDict()?' Менять словари может редактор.':''}</p></section>`;
   }
   const empty=!PLAN&&!SCHED&&t!=='props'?'<p class="note">Откройте план или расписание — словари заполняются названиями из них.</p>':'';
@@ -1260,7 +1308,7 @@ addEventListener('resize',closePropMenu);
 let PREV=null;
 function openPreview(mode,key){
   const w=W();if(!w) return;
-  const cs=cards(schedRecs(mode,key,w),mode);markConflicts(cs,mode,key);
+  key=canon(mode,key);const cs=cards(schedRecs(mode,key,w),mode);markOrig(cs,mode,key);markConflicts(cs,mode,key);
   PREV={mode,key};
   $('#modalEyebrow').textContent=`Неделя ${w.week||''} · расписание ${MODE_NAME[mode]}`;
   $('#modalTitle').textContent=label(mode,key);
@@ -1359,7 +1407,7 @@ addEventListener('dragover',e=>e.preventDefault());
 addEventListener('drop',e=>{e.preventDefault();dragN=0;$('#drop').hidden=true;openFiles([...e.dataTransfer.files])});
 
 /* ---------- Навигация ---------- */
-function go(mode,key){if(VIEW_ONLY&&mode!=='group') return;st.mode=mode;st.key[mode]=key;st.q='';$('#q').value='';closePreview();render();scrollTo({top:0})}
+function go(mode,key){if(VIEW_ONLY&&mode!=='group') return;st.mode=mode;st.key[mode]=key==='*'?key:canon(mode,key);st.q='';$('#q').value='';closePreview();render();scrollTo({top:0})}
 document.querySelector('.seg').addEventListener('click',e=>{const b=e.target.closest('[data-view]');if(!b) return;st.view=b.dataset.view;render()});
 document.querySelector('.tabs').addEventListener('click',e=>{const b=e.target.closest('.tab');if(!b||b.hidden) return;st.mode=b.dataset.mode;st.q='';$('#q').value='';render()});
 $('#list').addEventListener('click',e=>{const b=e.target.closest('.item');if(!b) return;st.key[st.mode]=b.dataset.key;render();if(innerWidth<=820) $('#main').scrollIntoView({behavior:'smooth'})});
@@ -1458,7 +1506,7 @@ async function pdfLib(){
 const trunc=(s,n)=>s.length>n?s.slice(0,n-1).trim()+'…':s;
 const LAY={hLineWidth:()=>.5,vLineWidth:()=>.5,hLineColor:()=>PC.rule,vLineColor:()=>PC.rule,paddingLeft:()=>3,paddingRight:()=>3,paddingTop:()=>2,paddingBottom:()=>2};
 const STY={h:{fontSize:14,bold:true,color:PC.ink},s:{fontSize:8.5,color:PC.muted,margin:[0,2,0,8]},th:{bold:true,fontSize:8,color:PC.ink},note:{fontSize:7,color:PC.muted,margin:[0,8,0,0]}};
-const entTitle=(mode,key)=>mode==='group'?'Расписание группы '+key:mode==='teacher'?'Расписание преподавателя '+tName(key):'Расписание аудитории '+key;
+const entTitle=(mode,key)=>mode==='group'?'Расписание группы '+key:mode==='teacher'?'Расписание преподавателя '+fullLabel(mode,key):'Расписание аудитории '+fullLabel(mode,key);
 function pdfLesson(c,mode,n){
   const L=n>2?34:n>1?62:110;const subj=trunc(c.subject,L);const fs=n>1?6.8:7.5;
   const sg=c.subgroup?(c.subgroup<=2?c.subgroup+' п/г':'п/г '+c.subgroup):'';
