@@ -430,3 +430,23 @@ body.v-dict .adm-tabs button{white-space:nowrap}
   table.dict-t td.d-full{max-width:none;word-break:break-word}
   .props-t th:nth-child(4),.props-t td:nth-child(4){display:none}
 }
+/* вид расписания: по одному / сводная таблица */
+.laybar{display:flex;align-items:center;flex-wrap:wrap;gap:6px 12px;margin-bottom:14px}
+.laybar .seg{align-items:center}
+.laybar .seg-sep{padding:0 4px 0 10px;color:var(--muted);font-size:12px;border-left:1px solid var(--rule);margin-left:4px}
+.rg-group thead th,.rg-teacher thead th{min-width:132px}
+.rg .rg-c th{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);background:var(--sunk);border-bottom:1px solid var(--rule)}
+.rg .occ .s{color:var(--ink);font-weight:500;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.rg .occ .link{font-weight:500}
+.rg .occ .ctag.z{background:var(--bad);margin-bottom:2px}
+.rg .sgs{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+.rg .sgs>div+div{border-left:1px dashed var(--rule);padding-left:4px}
+.rg .rg-c th{position:static}
+.rg .rg-c th{text-align:left}
+.rg .rg-c th span{position:sticky;left:112px;padding:0 6px}
+.rg .occ small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rg .sgs .occ .s{-webkit-line-clamp:1}
+.rg .sgs .occ small .tag{display:none}
+.rg-group td,.rg-teacher td{max-width:180px}
+.rg-group td,.rg-teacher td{width:170px;min-width:170px}
+.rg .sgs>div,.rg .occ{min-width:0}

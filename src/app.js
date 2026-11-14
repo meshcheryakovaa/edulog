@@ -169,7 +169,7 @@ function computeUpload(base,op){
 
 /* ---------- Состояние ---------- */
 let PLAN=null, SCHED=null;
-const st={view:'plan',mode:'group',key:{group:null,teacher:null,room:null},q:'',wi:0,onlyMis:false,chOnly:false,dtab:'disc',dq:'',donly:false,pf:null};
+const st={view:'plan',mode:'group',key:{group:null,teacher:null,room:null},one:{},q:'',wi:0,onlyMis:false,chOnly:false,dtab:'disc',dq:'',donly:false,pf:null};
 try{const s=JSON.parse(localStorage.getItem('plan-sched-view')||'null');if(s){if(s.view) st.view=s.view;if(s.mode) st.mode=s.mode;if(s.dtab) st.dtab=s.dtab;Object.assign(st.key,s.key||{})}}catch(e){}
 function save(){try{localStorage.setItem('plan-sched-view',JSON.stringify({view:st.view,mode:st.mode,key:st.key,dtab:st.dtab}))}catch(e){}}
 const W=()=>SCHED?SCHED.weeks[st.wi]:null;
@@ -640,17 +640,18 @@ function items(mode){
     return mode==='room'?list:list.sort((a,b)=>coll.compare(a.label,b.label));
   }
   const plan=st.view==='plan', w=W();
-  if(mode==='group') return REG.groups.map(n=>groupItem(n,plan,w)).sort((a,b)=>a.secO-b.secO||coll.compare(a.label,b.label));
-  if(mode==='teacher') return [...REG.teachers.values()].map(e=>{const k=e.key;
+  const ALL={key:'*',label:ALL_NAME[mode],all:true,present:true,n:'',sec:'',secO:-1};
+  if(mode==='group'){const l=REG.groups.map(n=>groupItem(n,plan,w)).sort((a,b)=>a.secO-b.secO||coll.compare(a.label,b.label));if(!plan&&SCHED) l.unshift(ALL);return l}
+  if(mode==='teacher'){const l=[...REG.teachers.values()].map(e=>{const k=e.key;
     if(plan){const rs=planRows('teacher',k);return {key:k,label:tShow(k),present:rs.length>0,n:rs.length?rs.reduce((a,r)=>a+r.hours,0)+' ч':'—'}}
     const rs=schedRecs('teacher',k,w);const s=slots(rs);const p=planPairs('teacher',k,w);
     return {key:k,label:tShow(k),present:rs.length>0,n:s+' '+plural(s,'пара','пары','пар'),dot:!PLAN?'':(p==null&&!s?'none':((p||0)===s?'ok':'warn'))};
-  }).sort((a,b)=>coll.compare(a.label,b.label));
+  }).sort((a,b)=>coll.compare(a.label,b.label));if(!plan&&SCHED) l.unshift(ALL);return l}
   const list=REG.rooms.map(k=>{
     if(plan){const rs=planRows('room',k);return {key:k,label:rShow(k),present:rs.length>0,n:rs.length?rs.reduce((a,r)=>a+r.hours,0)+' ч':'—'}}
     const rs=schedRecs('room',k,w);const s=slots(rs);return {key:k,label:rShow(k),present:rs.length>0,n:s+' '+plural(s,'пара','пары','пар')};
   });
-  if(!plan&&SCHED) list.unshift({key:'*',label:'Все аудитории',all:true,present:true,n:''});
+  if(!plan&&SCHED) list.unshift(ALL);
   return list;
 }
 function groupItem(n,plan,w){
@@ -680,7 +681,7 @@ function renderList(){
     (T&&T.has(i.key)?`<span class="chm" title="${st.view==='sched'?'Есть изменения на этой неделе':'Есть изменения в последней загрузке расписания'}">изм.</span>`:'')+`<span class="n">${i.n}</span></button>`;
   if(st.mode==='group'){
     const secs=[...new Map(its.map(i=>[i.sec,i.secO])).entries()].sort((a,b)=>a[1]-b[1]).map(x=>x[0]);
-    el.innerHTML=secs.map(s=>`<div class="sec">${esc(s)}</div>`+its.filter(i=>i.sec===s).sort((a,b)=>coll.compare(a.label,b.label)).map(btn).join('')).join('');
+    el.innerHTML=secs.map(s=>(s?`<div class="sec">${esc(s)}</div>`:'')+its.filter(i=>i.sec===s).sort((a,b)=>coll.compare(a.label,b.label)).map(btn).join('')).join('');
   } else el.innerHTML=its.map(btn).join('');
 }
 function renderTabs(){
@@ -691,6 +692,7 @@ function renderTabs(){
   sb.innerHTML='Расписание'+(nu?` <span class="tcnt" title="Непросмотренных изменений на неделе ${esc(w.week||fmtRange(w))}: ${nu}">${nu}</span>`:'');
   document.querySelector('label[for=file]').hidden=VIEW_ONLY;$('#pdf-zach').hidden=VIEW_ONLY;$('#srcPlan').hidden=VIEW_ONLY;
 }
+const ALL_NAME={group:'Все группы',teacher:'Все преподаватели',room:'Все аудитории'};
 const MODE_NAME={group:'группы',teacher:'преподавателя',room:'аудитории'};
 const label=(mode,key)=>mode==='teacher'?tShow(key):mode==='group'?gShow(key):rShow(key);
 const fullLabel=(mode,key)=>mode==='teacher'?tName(key):String(key);
@@ -849,7 +851,7 @@ function renderSched(key){
   const main=$('#main');
   if(!SCHED||!SCHED.weeks.length) return main.innerHTML=VIEW_ONLY?emptyCard('Расписание не опубликовано','Пока нет ни одной недели расписания. Оно появится здесь, когда редактор его опубликует.'):emptyCard(SCHED?'В базе нет недель':'Расписание не загружено','Откройте JSON-файл расписания (раздел timetable): одна или несколько целых недель. Загрузка заменяет только эти недели, остальные остаются. План при этом останется загруженным, и расписание можно будет сверить с ним.',true);
   const w=W();const mode=st.mode;
-  if(mode==='room'&&key==='*') return renderRoomsGrid(w);
+  if(key==='*') return renderGrid(w,mode);
   if(key==null) return main.innerHTML=`<div class="head">${weekNav(w)}</div>`+emptyCard('Список пуст','В расписании нет записей для этого раздела.');
   const recs=schedRecs(mode,key,w);const cs=cards(recs,mode);const conf=markConflicts(cs,mode,key);
   const ghosts=markChanges(cs,mode,key,w);const chn=cs.filter(c=>c.chg).length+ghosts.length;
@@ -866,32 +868,79 @@ function renderSched(key){
   if(CAN_SEEN){if(uns) stats+=`<div class="stat acc"><dt>Не просмотрено изменений</dt><dd>${uns}</dd></div>`}
   else if(chn) stats+=`<div class="stat acc"><dt>Изменено при загрузке</dt><dd>${chn}</dd></div>`;
   const course=mode==='group'&&REG.courses[key]?`<span class="pill mute">${REG.courses[key]} курс</span>`:'';
-  const head=`<section class="head"><div class="head-l"><span class="eyebrow">Расписание ${MODE_NAME[mode]}</span>${titleRow(key)}${course?`<div>${course}</div>`:''}</div>${weekNav(w)}</section>`;
+  const head=layoutBar(mode,false)+`<section class="head"><div class="head-l"><span class="eyebrow">Расписание ${MODE_NAME[mode]}</span>${titleRow(key)}${course?`<div>${course}</div>`:''}</div>${weekNav(w)}</section>`;
   const chp=entityChangesPanel(mode,key,{week:w.key,quiet:true});
   if(!recs.length){main.innerHTML=head+emptyCard('Нет занятий',`На этой неделе в расписании нет занятий: ${esc(label(mode,key))}.`)+chp+(VIEW_ONLY?'':reconPanel(mode,key,w));return}
   main.innerHTML=head+`<dl class="stats">${stats}</dl>
     <div class="legend"><span>Клик по преподавателю, аудитории или группе открывает её расписание</span><span>Правый клик — быстрый просмотр недели</span><span>Во всю ширину — вся группа, слева — 1 подгруппа, справа — 2 подгруппа</span>${chn?'<span>«Новое», «Изменено», «Отменено» — по последней загрузке этой недели</span>':''}</div>
     ${weekTable(cs,mode,w,false,ghosts)}${chp}${mode!=='room'&&!VIEW_ONLY?reconPanel(mode,key,w):''}`;
 }
-function renderRoomsGrid(w){
-  const rooms=[...new Set(w.recs.flatMap(r=>r.rooms))].sort(cmpRooms);
-  const cs=cards(w.recs,'room');
-  const cell=new Map();cs.forEach(c=>c.rooms.forEach(r=>{const k=r+'|'+c.day+'|'+c.period;(cell.get(k)||cell.set(k,[]).get(k)).push(c)}));
+/* переключатель вида расписания: одно расписание или сводная таблица (столбцы — группы, преподаватели или аудитории) */
+function layoutBar(mode,grid){
+  const b=(v,t,on)=>`<button role="tab" data-lay="${v}" aria-selected="${on}">${t}</button>`;
+  return `<div class="laybar"><span class="eyebrow">Вид</span><div class="seg" role="tablist" aria-label="Вид расписания">`+
+    b('one','По одному',!grid)+`<span class="seg-sep">Сводная таблица:</span>`+
+    b('group','группы',grid&&mode==='group')+b('teacher','преподаватели',grid&&mode==='teacher')+b('room','аудитории',grid&&mode==='room')+`</div></div>`;
+}
+/* сводная таблица недели: столбцы — все группы / преподаватели / аудитории, строки — пары по дням */
+function renderGrid(w,mode){
+  const cs=cards(w.recs,mode);
+  const keysOf=c=>mode==='group'?c.groups:mode==='teacher'?c.teachers.map(t=>t.key):c.rooms;
+  const cell=new Map();
+  cs.forEach(c=>keysOf(c).forEach(k=>{const id=k+'|'+c.day+'|'+c.period;(cell.get(id)||cell.set(id,[]).get(id)).push(c)}));
+  let cols=[...new Set(cs.flatMap(keysOf))];
+  if(mode==='group') cols.sort((a,b)=>(REG.courses[a]||99)-(REG.courses[b]||99)||coll.compare(gShow(a),gShow(b)));
+  else if(mode==='teacher') cols.sort((a,b)=>coll.compare(tShow(a),tShow(b)));
+  else cols.sort(cmpRooms);
+  const days=[...new Set(w.recs.map(r=>r.day))].sort((a,b)=>a-b);
   let conf=0;
-  const headR=rooms.map(r=>{const p=NAMES.room.has(r)?{code:rShow(r),owner:''}:roomParts(r);return `<th scope="col"><button class="link" data-go="room" data-key="${esc(r)}" title="${esc(r)}"><b>${esc(p.code)}</b></button>${p.owner?`<small>${esc(p.owner)}</small>`:''}</th>`}).join('');
-  let body='';
-  for(let d=1;d<=6;d++) for(let p=1;p<=w.maxP;p++){
-    const tm=w.times[p]||['',''];
-    const tds=rooms.map(r=>{const its=cell.get(r+'|'+d+'|'+p)||[];if(!its.length) return '<td></td>';
-      const bad=its.length>1&&/^\d/.test(r);if(bad) conf++;
-      if(its.length>3) return `<td class="busy"><div class="occ" title="${esc(its.map(c=>c.groups.join(', ')+' — '+dShow(c.subject)).join('\n'))}"><span>${its.flatMap(c=>c.groups).map(linkG).join(', ')}</span><small>${its.length} ${plural(its.length,'занятие','занятия','занятий')}</small></div></td>`;
-      return `<td class="${bad?'conf':'busy'}">${its.map(c=>`<div class="occ" title="${esc(dShow(c.subject))}"><span>${c.groups.map(linkG).join(', ')}</span><small>${esc(c.teachers.map(t=>tShow(t.key)).join(', ')||'—')}</small></div>`).join('')}</td>`}).join('');
-    body+=`<tr class="${p===1&&d>1?'ds':''}">${p===1?`<th class="rg-d" rowspan="${w.maxP}" scope="rowgroup"><span>${DAYS[d-1]} ${esc(w.dates[d]||'')}</span></th>`:''}<th class="rg-p" scope="row"><b>${p}</b> ${esc(tm[0])}</th>${tds}</tr>`;
+  const clash=(its,k)=>{
+    if(its.length<2) return false;
+    if(mode==='group'){const sg=its.map(c=>c.subgroup||0);return sg.includes(0)||new Set(sg).size<sg.length}
+    if(mode==='room') return /^\d/.test(k);
+    return true;
+  };
+  const tz=c=>c.zach?'<span class="ctag z">Зачёт</span>':'';
+  const occ=c=>{
+    const T=c.teachers.map(t=>linkT(t)).join(', '),R=c.rooms.map(linkR).join(', '),G=c.groups.map(linkG).join(', ');
+    const S=`<span class="s" title="${esc(c.subject)}">${esc(dShow(c.subject))}</span>`;
+    const sg=c.subgroup?`<span class="tag">${sgText(c.subgroup)}</span>`:'';
+    if(mode==='group') return `<div class="occ">${tz(c)}${S}<small>${T||'—'}${R?' · '+R:''} ${sg}</small></div>`;
+    if(mode==='teacher') return `<div class="occ"><span>${G} ${sg}</span>${tz(c)}${S}<small>${R||'—'}</small></div>`;
+    return `<div class="occ"><span>${G} ${sg}</span><small>${T||'—'}</small></div>`;
+  };
+  const td=(k,d,p)=>{
+    const its=cell.get(k+'|'+d+'|'+p)||[];if(!its.length) return '<td></td>';
+    const bad=clash(its,k);if(bad) conf++;
+    if(mode==='room'&&its.length>3) return `<td class="busy"><div class="occ" title="${esc(its.map(c=>c.groups.join(', ')+' — '+dShow(c.subject)).join('\n'))}"><span>${its.flatMap(c=>c.groups).map(linkG).join(', ')}</span><small>${its.length} ${plural(its.length,'занятие','занятия','занятий')}</small></div></td>`;
+    // у группы 1 и 2 подгруппа — рядом, как в карточках
+    if(mode==='group'&&!bad&&its.every(c=>c.subgroup)){
+      const by=n=>its.filter(c=>c.subgroup===n);
+      return `<td class="busy"><div class="sgs"><div>${by(1).map(occ).join('')}</div><div>${its.filter(c=>c.subgroup!==1).map(occ).join('')}</div></div></td>`;
+    }
+    return `<td class="${bad?'conf':'busy'}">${its.map(occ).join('')}</td>`;
+  };
+  const headCell=k=>{
+    if(mode==='room'){const p=NAMES.room.has(k)?{code:rShow(k),owner:''}:roomParts(k);return `<th scope="col"><button class="link" data-go="room" data-key="${esc(k)}" title="${esc(k)}"><b>${esc(p.code)}</b></button>${p.owner?`<small>${esc(p.owner)}</small>`:''}</th>`}
+    if(mode==='teacher') return `<th scope="col"><button class="link" data-go="teacher" data-key="${esc(k)}" title="${esc(tName(k))}"><b>${esc(tShow(k))}</b></button></th>`;
+    return `<th scope="col"><button class="link" data-go="group" data-key="${esc(k)}" title="${esc(k)}"><b>${esc(gShow(k))}</b></button></th>`;
+  };
+  // у групп над шапкой — строка курсов
+  let pre='';
+  if(mode==='group'){
+    const runs=[];cols.forEach(k=>{const c=REG.courses[k]||0;const l=runs[runs.length-1];if(l&&l.c===c) l.n++;else runs.push({c,n:1})});
+    pre=`<tr class="rg-c"><th class="rg-d"></th><th class="rg-p"></th>${runs.map(r=>`<th colspan="${r.n}" scope="colgroup"><span>${r.c?r.c+' курс':'без курса'}</span></th>`).join('')}</tr>`;
   }
-  $('#main').innerHTML=`<section class="head"><div class="head-l"><span class="eyebrow">Сетка занятости</span><h1>Все аудитории</h1></div>${weekNav(w)}</section>
-    <dl class="stats"><div class="stat"><dt>Аудиторий</dt><dd>${rooms.length}</dd></div><div class="stat"><dt>Занятий</dt><dd>${cs.length}</dd></div>${conf?`<div class="stat bad"><dt>Накладки</dt><dd>${conf}</dd></div>`:''}</dl>
-    <div class="legend"><span>Наведите на группу, чтобы увидеть дисциплину</span><span>Клик по номеру — расписание аудитории</span></div>
-    <div class="rg-wrap"><table class="rg"><thead><tr><th class="rg-d" scope="col">День</th><th class="rg-p" scope="col">Пара</th>${headR}</tr></thead><tbody>${body}</tbody></table></div>`;
+  let body='';
+  for(const d of days) for(let p=1;p<=w.maxP;p++){
+    const tm=w.times[p]||['',''];
+    body+=`<tr class="${p===1&&d!==days[0]?'ds':''}">${p===1?`<th class="rg-d" rowspan="${w.maxP}" scope="rowgroup"><span>${DAYS[d-1]} ${esc(w.dates[d]||'')}</span></th>`:''}<th class="rg-p" scope="row"><b>${p}</b> ${esc(tm[0])}</th>${cols.map(k=>td(k,d,p)).join('')}</tr>`;
+  }
+  const what={group:['Групп','Все группы'],teacher:['Преподавателей','Все преподаватели'],room:['Аудиторий','Все аудитории']}[mode];
+  $('#main').innerHTML=layoutBar(mode,true)+`<section class="head"><div class="head-l"><span class="eyebrow">Сводная таблица</span><h1>${what[1]}</h1></div>${weekNav(w)}</section>
+    <dl class="stats"><div class="stat"><dt>${what[0]}</dt><dd>${cols.length}</dd></div><div class="stat"><dt>Занятий</dt><dd>${cs.length}</dd></div>${conf?`<div class="stat bad"><dt>Накладки</dt><dd>${conf}</dd></div>`:''}</dl>
+    <div class="legend"><span>Столбцы — ${what[1].toLowerCase()}, строки — пары по дням недели</span><span>Клик по заголовку столбца — его расписание</span><span>Красным — накладки</span></div>
+    <div class="rg-wrap"><table class="rg rg-${mode}"><thead>${pre}<tr><th class="rg-d" scope="col">День</th><th class="rg-p" scope="col">Пара</th>${cols.map(headCell).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
 /* ---------- Отображение изменений ---------- */
@@ -1255,12 +1304,16 @@ function movePropBy(id,d){
 }
 document.addEventListener('click',e=>{
   const g=e.target.closest('[data-go]');if(g){go(g.dataset.go,g.dataset.key);return}
+  const ly=e.target.closest('[data-lay]');if(ly){const m=ly.dataset.lay;
+    if(m==='one'){if(st.key[st.mode]==='*') st.key[st.mode]=st.one[st.mode]||null}
+    else{if(st.key[m]!=='*') st.one[m]=st.key[m];st.mode=m;st.key[m]='*'}
+    st.q='';$('#q').value='';render();return}
   const s=e.target.closest('[data-step]');
   if(s){const ps=LIST.filter(i=>i.present&&!i.all);if(ps.length<2) return;const i=ps.findIndex(x=>x.key===st.key[st.mode]);
     st.key[st.mode]=ps[((i<0?0:i)+(+s.dataset.step)+ps.length)%ps.length].key;render();return}
   const wk=e.target.closest('[data-wk]');if(wk&&SCHED){st.wi=Math.max(0,Math.min(SCHED.weeks.length-1,st.wi+(+wk.dataset.wk)));render();return}
   const gw=e.target.closest('[data-gowk]');if(gw&&SCHED){const i=SCHED.weeks.findIndex(x=>x.key===gw.dataset.gowk);if(i<0){toast('Этой недели уже нет в базе.',true);return}
-    st.wi=i;st.view='sched';if(st.key[st.mode]==='*'&&st.mode!=='room') st.key[st.mode]=null;closePreview();render();scrollTo({top:0});return}
+    st.wi=i;st.view='sched';closePreview();render();scrollTo({top:0});return}
   if(e.target.closest('[data-seenall]')){setSeen(PANEL_FRESH,true);return}
   const vg=e.target.closest('[data-view-go]');if(vg){st.view=vg.dataset.viewGo;if(vg.dataset.dtabGo) st.dtab=vg.dataset.dtabGo;closePropMenu();render();scrollTo({top:0});return}
   const pb=e.target.closest('[data-prow]');if(pb){if(!PMENU.hidden&&PMENU.dataset.row===pb.dataset.prow) closePropMenu();else openPropMenu(pb);return}
