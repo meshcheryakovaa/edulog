@@ -879,12 +879,13 @@ function renderSched(key){
 /* столбцы сводной таблицы: порядок и скрытые — свои у каждого пользователя.
    COLS[mode] = {o:[ключи по порядку], h:[скрытые]} */
 const SKEY_COLS='edulog-cols';
-let COLS={};try{COLS=JSON.parse(localStorage.getItem(SKEY_COLS)||'{}')||{}}catch(e){}
+// без входа — в этом браузере; с входом — в базе, у каждого пользователя свои (setPrefs)
+let COLS={};if(!CLOUD){try{COLS=JSON.parse(localStorage.getItem(SKEY_COLS)||'{}')||{}}catch(e){}}
 const colCfg=mode=>COLS[mode]||(COLS[mode]={o:[],h:[]});
 function saveCols(){
   for(const m of Object.keys(COLS)){const c=COLS[m];if(!c.o.length&&!c.h.length) delete COLS[m]}
-  try{localStorage.setItem(SKEY_COLS,JSON.stringify(COLS))}catch(e){}
-  if(CLOUD&&window.EduLOGCloud&&window.EduLOGCloud.savePref) window.EduLOGCloud.savePref('cols',COLS);
+  if(!CLOUD){try{localStorage.setItem(SKEY_COLS,JSON.stringify(COLS))}catch(e){}return}
+  if(window.EduLOGCloud&&window.EduLOGCloud.savePref) window.EduLOGCloud.savePref('cols',COLS);
 }
 const colsOwn=mode=>!!(COLS[mode]&&(COLS[mode].o.length||COLS[mode].h.length));
 function applyColOrd(mode,cols){
@@ -1723,6 +1724,8 @@ window.EduLOG={
   zachetPos,zachetMoves,
   // Словари из таблиц dict_names / props / row_props
   setDict,
+  // личные настройки пользователя из таблицы user_prefs
+  setPrefs(p){const c=p&&p.cols;COLS=c&&typeof c==='object'&&!Array.isArray(c)?c:{};for(const m of Object.keys(COLS)){const v=COLS[m];if(!v||!Array.isArray(v.o)||!Array.isArray(v.h)) delete COLS[m]}},
   refresh(){buildRegistry();closePreview();render()},
 };
 if(!CLOUD){
