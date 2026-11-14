@@ -815,13 +815,14 @@ function slotBody(its,gs,mode,w,compact){
   return full+pair;
 }
 function weekTable(cs,mode,w,compact,ghosts){
-  const head=DAYS.map((d,i)=>`<th scope="col"><span>${d}</span><small>${esc(w.dates[i+1]||'')}</small></th>`).join('');
+  const head='<th class="wk-p" scope="col"><span>Пара</span></th>'+DAYS.map((d,i)=>`<th scope="col"><span>${d}</span><small>${esc(w.dates[i+1]||'')}</small></th>`).join('');
   let rows='';
   for(let p=1;p<=w.maxP;p++){
     const tm=w.times[p]||['',''];
-    rows+='<tr>'+DAYS.map((_,i)=>{const its=cs.filter(c=>c.day===i+1&&c.period===p);
+    // номер и время пары — в первом столбце, как в сводной таблице
+    rows+=`<tr><th class="wk-p" scope="row"><b>${p}</b><small>${esc(tm[0])}</small><small>${esc(tm[1])}</small></th>`+DAYS.map((_,i)=>{const its=cs.filter(c=>c.day===i+1&&c.period===p);
       const gs=(ghosts||[]).filter(g=>g.day===i+1&&g.period===p);
-      return `<td><div class="slot-h"><span>${p} пара</span><time>${esc(tm[0])}–${esc(tm[1])}</time></div>${its.length||gs.length?slotBody(its,gs,mode,w,compact):'<div class="nil">—</div>'}</td>`}).join('')+'</tr>';
+      return `<td>${its.length||gs.length?slotBody(its,gs,mode,w,compact):'<div class="nil">—</div>'}</td>`}).join('')+'</tr>';
   }
   return `<div class="wk-wrap"><table class="wk"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
 }
@@ -924,6 +925,9 @@ function renderGrid(w,mode){
   cols=applyColOrd(mode,cols);GRIDALL=cols;
   const hidden=cols.filter(k=>colCfg(mode).h.includes(k));const isOff=k=>hidden.includes(k);if(!st.colEdit) cols=cols.filter(k=>!isOff(k));
   const days=[...new Set(w.recs.map(r=>r.day))].sort((a,b)=>a-b);
+  // «Новое», «Изменено», «Отменено» по последней загрузке недели — как в расписании одного; просмотренное не подсвечиваем
+  const ghost=new Map();
+  for(const k of GRIDALL) for(const g of markChanges(cs,mode,k,w)){const id=k+'|'+g.day+'|'+g.period;(ghost.get(id)||ghost.set(id,[]).get(id)).push(g)}
   let conf=0;
   const clash=(its,k)=>{
     if(its.length<2) return false;
@@ -931,28 +935,33 @@ function renderGrid(w,mode){
     if(mode==='room') return /^\d/.test(k);
     return true;
   };
-  const tz=c=>c.zach?'<span class="ctag z">Зачёт</span>':'';
+  const tz=c=>(c.zach?'<span class="ctag z" title="Последняя пара зачётной дисциплины">Зачёт</span>':'')+
+    (c.chg?`<span class="ctag ${c.chg}" title="${esc((c.chg==='add'?'Добавлено':'Изменено')+' при последней загрузке этой недели.'+(c.was&&c.was.length?' Было: '+c.was.map(it=>[it.s,it.t.join(', '),it.r.join(', '),it.tm].filter(Boolean).join(' · ')).join('; '):''))}">${c.chg==='add'?'Новое':'Изменено'}</span>`:'');
+  const gone=g=>{const it=g.it,T=it.t.map(tShowRaw).join(', '),R=it.r.map(rShow).join(', ');
+    const meta=mode==='group'?[T,R]:mode==='teacher'?[gShow(g.group),R]:[gShow(g.group),T];
+    return `<div class="occ gone" title="Отменено при последней загрузке этой недели"><span class="ctag del">Отменено</span><span class="s" title="${esc(it.s)}">${esc(dShow(it.s))}</span><small>${esc(meta.filter(Boolean).join(' · ')||'—')}${g.subgroup?' · '+sgText(g.subgroup):''}</small></div>`};
   const occ=c=>{
     const T=c.teachers.map(t=>linkT(t)).join(', '),R=c.rooms.map(linkR).join(', '),G=c.groups.map(linkG).join(', ');
     const S=`<span class="s" title="${esc(c.subject)}">${esc(dShow(c.subject))}</span>`;
     const sg=c.subgroup?`<span class="tag">${sgText(c.subgroup)}</span>`:'';
     if(mode==='group') return `<div class="occ">${tz(c)}${S}<small>${T||'—'}${R?' · '+R:''} ${sg}</small></div>`;
     if(mode==='teacher') return `<div class="occ"><span class="g">${G} ${sg}</span>${tz(c)}${S}<small>${R||'—'}</small></div>`;
-    return `<div class="occ"><span class="g">${G} ${sg}</span><small>${T||'—'}</small></div>`;
+    return `<div class="occ"><span class="g">${G} ${sg}</span>${tz(c)}<small>${T||'—'}</small></div>`;
   };
   const EYE='<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
   const EYE_OFF='<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.6 5.1A10.4 10.4 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6A17.4 17.4 0 0 0 2 12s3.6 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="M2 2l20 20"/></svg>';
   const td=(k,d,p)=>{
     if(isOff(k)) return '<td class="off"></td>';
-    const its=cell.get(k+'|'+d+'|'+p)||[];if(!its.length) return '<td></td>';
+    const its=cell.get(k+'|'+d+'|'+p)||[],gs=(ghost.get(k+'|'+d+'|'+p)||[]).map(gone).join('');
+    if(!its.length) return gs?`<td class="chg">${gs}</td>`:'<td></td>';
     const bad=clash(its,k);if(bad) conf++;
-    if(mode==='room'&&its.length>3) return `<td class="busy"><div class="occ" title="${esc(its.map(c=>c.groups.join(', ')+' — '+dShow(c.subject)).join('\n'))}"><span>${its.flatMap(c=>c.groups).map(linkG).join(', ')}</span><small>${its.length} ${plural(its.length,'занятие','занятия','занятий')}</small></div></td>`;
+    if(mode==='room'&&its.length>3) return `<td class="busy"><div class="occ" title="${esc(its.map(c=>c.groups.join(', ')+' — '+dShow(c.subject)).join('\n'))}"><span>${its.flatMap(c=>c.groups).map(linkG).join(', ')}</span><small>${its.length} ${plural(its.length,'занятие','занятия','занятий')}</small></div>${gs}</td>`;
     // у группы 1 и 2 подгруппа — рядом, как в карточках
     if(mode==='group'&&!bad&&its.every(c=>c.subgroup)){
       const by=n=>its.filter(c=>c.subgroup===n);
-      return `<td class="busy"><div class="sgs"><div>${by(1).map(occ).join('')}</div><div>${its.filter(c=>c.subgroup!==1).map(occ).join('')}</div></div></td>`;
+      return `<td class="busy"><div class="sgs"><div>${by(1).map(occ).join('')}</div><div>${its.filter(c=>c.subgroup!==1).map(occ).join('')}</div></div>${gs}</td>`;
     }
-    return `<td class="${bad?'conf':'busy'}">${its.map(occ).join('')}</td>`;
+    return `<td class="${bad?'conf':'busy'}">${its.map(occ).join('')}${gs}</td>`;
   };
   const ctl=k=>{if(!st.colEdit) return '';const i=cols.indexOf(k);
     return `<div class="co-ctl"><button class="arrow xs" data-colmv="-1" data-k="${esc(k)}" aria-label="Левее"${i?'':' disabled'}>←</button><button class="arrow xs eye${isOff(k)?' is-off':''}" data-colhide="${esc(k)}" aria-pressed="${!isOff(k)}" aria-label="${isOff(k)?'Показать столбец':'Скрыть столбец'}" title="${isOff(k)?'Не видно — показать':'Видно — скрыть'}">${isOff(k)?EYE_OFF:EYE}</button><button class="arrow xs" data-colmv="1" data-k="${esc(k)}" aria-label="Правее"${i<cols.length-1?'':' disabled'}>→</button></div>`};
@@ -975,7 +984,7 @@ function renderGrid(w,mode){
   const what={group:['Групп','Все группы'],teacher:['Преподавателей','Все преподаватели'],room:['Аудиторий','Все аудитории']}[mode];
   $('#main').innerHTML=`<section class="head"><div class="head-l"><span class="eyebrow">Сводная таблица</span><h1>${what[1]}</h1>${st.colEdit?'':`<div class="co-bar"><button class="btn ghost sm" data-coledit>⇄ Настроить столбцы</button></div>`}</div>${weekNav(w)}</section>${colBar(mode,GRIDALL,hidden)}
     <dl class="stats"><div class="stat"><dt>${what[0]}</dt><dd>${GRIDALL.length-hidden.length}${hidden.length?` <small>из ${GRIDALL.length}</small>`:''}</dd></div><div class="stat"><dt>Занятий</dt><dd>${cs.length}</dd></div>${conf?`<div class="stat bad"><dt>Накладки</dt><dd>${conf}</dd></div>`:''}</dl>
-    <div class="legend"><span>Столбцы — ${what[1].toLowerCase()}, строки — пары по дням недели</span><span>Клик по заголовку столбца — его расписание, перетаскивание — порядок столбцов</span><span>Красным — накладки</span></div>
+    <div class="legend"><span>Столбцы — ${what[1].toLowerCase()}, строки — пары по дням недели</span><span>Клик по заголовку столбца — его расписание, перетаскивание — порядок столбцов</span><span>Красным — накладки</span><span>«Новое», «Изменено», «Отменено» — по последней загрузке недели, после отметки «просмотрено» метка исчезает</span></div>
     <div class="rg-wrap"><table class="rg rg-${mode}${st.colEdit?' co-edit':''}"><thead>${pre}<tr><th class="rg-d" scope="col">День</th><th class="rg-p" scope="col">Пара</th>${cols.map(headCell).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
