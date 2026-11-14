@@ -640,17 +640,18 @@ function items(mode){
     return mode==='room'?list:list.sort((a,b)=>coll.compare(a.label,b.label));
   }
   const plan=st.view==='plan', w=W();
-  if(mode==='group') return REG.groups.map(n=>groupItem(n,plan,w)).sort((a,b)=>a.secO-b.secO||coll.compare(a.label,b.label));
-  if(mode==='teacher') return [...REG.teachers.values()].map(e=>{const k=e.key;
+  const ALL={key:'*',label:ALL_NAME[mode],all:true,present:true,n:'',sec:'',secO:-1};
+  if(mode==='group'){const l=REG.groups.map(n=>groupItem(n,plan,w)).sort((a,b)=>a.secO-b.secO||coll.compare(a.label,b.label));if(!plan&&SCHED) l.unshift(ALL);return l}
+  if(mode==='teacher'){const l=[...REG.teachers.values()].map(e=>{const k=e.key;
     if(plan){const rs=planRows('teacher',k);return {key:k,label:tShow(k),present:rs.length>0,n:rs.length?rs.reduce((a,r)=>a+r.hours,0)+' ч':'—'}}
     const rs=schedRecs('teacher',k,w);const s=slots(rs);const p=planPairs('teacher',k,w);
     return {key:k,label:tShow(k),present:rs.length>0,n:s+' '+plural(s,'пара','пары','пар'),dot:!PLAN?'':(p==null&&!s?'none':((p||0)===s?'ok':'warn'))};
-  }).sort((a,b)=>coll.compare(a.label,b.label));
+  }).sort((a,b)=>coll.compare(a.label,b.label));if(!plan&&SCHED) l.unshift(ALL);return l}
   const list=REG.rooms.map(k=>{
     if(plan){const rs=planRows('room',k);return {key:k,label:rShow(k),present:rs.length>0,n:rs.length?rs.reduce((a,r)=>a+r.hours,0)+' ч':'—'}}
     const rs=schedRecs('room',k,w);const s=slots(rs);return {key:k,label:rShow(k),present:rs.length>0,n:s+' '+plural(s,'пара','пары','пар')};
   });
-  if(!plan&&SCHED) list.unshift({key:'*',label:'Все аудитории',all:true,present:true,n:''});
+  if(!plan&&SCHED) list.unshift(ALL);
   return list;
 }
 function groupItem(n,plan,w){
@@ -680,17 +681,19 @@ function renderList(){
     (T&&T.has(i.key)?`<span class="chm" title="${st.view==='sched'?'Есть изменения на этой неделе':'Есть изменения в последней загрузке расписания'}">изм.</span>`:'')+`<span class="n">${i.n}</span></button>`;
   if(st.mode==='group'){
     const secs=[...new Map(its.map(i=>[i.sec,i.secO])).entries()].sort((a,b)=>a[1]-b[1]).map(x=>x[0]);
-    el.innerHTML=secs.map(s=>`<div class="sec">${esc(s)}</div>`+its.filter(i=>i.sec===s).sort((a,b)=>coll.compare(a.label,b.label)).map(btn).join('')).join('');
+    el.innerHTML=secs.map(s=>(s?`<div class="sec">${esc(s)}</div>`:'')+its.filter(i=>i.sec===s).sort((a,b)=>coll.compare(a.label,b.label)).map(btn).join('')).join('');
   } else el.innerHTML=its.map(btn).join('');
 }
 function renderTabs(){
-  document.querySelectorAll('.tab').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.mode===st.mode)));
+  // роль «Просмотр» видит только расписание групп
+  document.querySelectorAll('.tab').forEach(b=>{b.setAttribute('aria-selected',String(b.dataset.mode===st.mode));b.hidden=VIEW_ONLY&&b.dataset.mode!=='group'});
   document.querySelectorAll('.seg [data-view]').forEach(b=>{b.setAttribute('aria-selected',String(b.dataset.view===st.view));if(b.dataset.view!=='admin') b.hidden=VIEW_ONLY&&b.dataset.view!=='sched'});
   // счётчик непросмотренных изменений текущей недели (по всем группам) на вкладке «Расписание»
   const sb=$('#view-sched'),w=W(),nu=CAN_SEEN&&w?weekUnseen(w.key).length:0;
   sb.innerHTML='Расписание'+(nu?` <span class="tcnt" title="Непросмотренных изменений на неделе ${esc(w.week||fmtRange(w))}: ${nu}">${nu}</span>`:'');
   document.querySelector('label[for=file]').hidden=VIEW_ONLY;$('#pdf-zach').hidden=VIEW_ONLY;$('#srcPlan').hidden=VIEW_ONLY;
 }
+const ALL_NAME={group:'Все группы',teacher:'Все преподаватели',room:'Все аудитории'};
 const MODE_NAME={group:'группы',teacher:'преподавателя',room:'аудитории'};
 const label=(mode,key)=>mode==='teacher'?tShow(key):mode==='group'?gShow(key):rShow(key);
 const fullLabel=(mode,key)=>mode==='teacher'?tName(key):String(key);
@@ -784,8 +787,8 @@ function renderPlan(key){
 let ZROWS=[],PROWS=[];
 
 /* ---------- Вид «Расписание» ---------- */
-const linkT=t=>`<button class="link" data-go="teacher" data-key="${esc(t.key)}"${tip(tShow(t.key),tName(t.key))}>${esc(tShow(t.key))}</button>`;
-const linkR=r=>`<button class="link" data-go="room" data-key="${esc(r)}"${tip(rShow(r),r)}>${esc(rShow(r))}</button>`;
+const linkT=t=>VIEW_ONLY?`<span${tip(tShow(t.key),tName(t.key))}>${esc(tShow(t.key))}</span>`:`<button class="link" data-go="teacher" data-key="${esc(t.key)}"${tip(tShow(t.key),tName(t.key))}>${esc(tShow(t.key))}</button>`;
+const linkR=r=>VIEW_ONLY?`<span${tip(rShow(r),r)}>${esc(rShow(r))}</span>`:`<button class="link" data-go="room" data-key="${esc(r)}"${tip(rShow(r),r)}>${esc(rShow(r))}</button>`;
 const linkG=g=>`<button class="link" data-go="group" data-key="${esc(g)}"${tip(gShow(g),g)}>${esc(gShow(g))}</button>`;
 function lessonCard(c,mode,w,compact){
   const tm=w.times[c.period]||['',''];
@@ -849,7 +852,7 @@ function renderSched(key){
   const main=$('#main');
   if(!SCHED||!SCHED.weeks.length) return main.innerHTML=VIEW_ONLY?emptyCard('Расписание не опубликовано','Пока нет ни одной недели расписания. Оно появится здесь, когда редактор его опубликует.'):emptyCard(SCHED?'В базе нет недель':'Расписание не загружено','Откройте JSON-файл расписания (раздел timetable): одна или несколько целых недель. Загрузка заменяет только эти недели, остальные остаются. План при этом останется загруженным, и расписание можно будет сверить с ним.',true);
   const w=W();const mode=st.mode;
-  if(mode==='room'&&key==='*') return renderRoomsGrid(w);
+  if(key==='*') return renderGrid(w,mode);
   if(key==null) return main.innerHTML=`<div class="head">${weekNav(w)}</div>`+emptyCard('Список пуст','В расписании нет записей для этого раздела.');
   const recs=schedRecs(mode,key,w);const cs=cards(recs,mode);const conf=markConflicts(cs,mode,key);
   const ghosts=markChanges(cs,mode,key,w);const chn=cs.filter(c=>c.chg).length+ghosts.length;
@@ -870,28 +873,110 @@ function renderSched(key){
   const chp=entityChangesPanel(mode,key,{week:w.key,quiet:true});
   if(!recs.length){main.innerHTML=head+emptyCard('Нет занятий',`На этой неделе в расписании нет занятий: ${esc(label(mode,key))}.`)+chp+(VIEW_ONLY?'':reconPanel(mode,key,w));return}
   main.innerHTML=head+`<dl class="stats">${stats}</dl>
-    <div class="legend"><span>Клик по преподавателю, аудитории или группе открывает её расписание</span><span>Правый клик — быстрый просмотр недели</span><span>Во всю ширину — вся группа, слева — 1 подгруппа, справа — 2 подгруппа</span>${chn?'<span>«Новое», «Изменено», «Отменено» — по последней загрузке этой недели</span>':''}</div>
+    <div class="legend">${VIEW_ONLY?'':'<span>Клик по преподавателю, аудитории или группе открывает её расписание</span><span>Правый клик — быстрый просмотр недели</span>'}<span>Во всю ширину — вся группа, слева — 1 подгруппа, справа — 2 подгруппа</span>${chn?'<span>«Новое», «Изменено», «Отменено» — по последней загрузке этой недели</span>':''}</div>
     ${weekTable(cs,mode,w,false,ghosts)}${chp}${mode!=='room'&&!VIEW_ONLY?reconPanel(mode,key,w):''}`;
 }
-function renderRoomsGrid(w){
-  const rooms=[...new Set(w.recs.flatMap(r=>r.rooms))].sort(cmpRooms);
-  const cs=cards(w.recs,'room');
-  const cell=new Map();cs.forEach(c=>c.rooms.forEach(r=>{const k=r+'|'+c.day+'|'+c.period;(cell.get(k)||cell.set(k,[]).get(k)).push(c)}));
+/* столбцы сводной таблицы: порядок и скрытые — свои у каждого пользователя.
+   COLS[mode] = {o:[ключи по порядку], h:[скрытые]} */
+const SKEY_COLS='edulog-cols';
+// без входа — в этом браузере; с входом — в базе, у каждого пользователя свои (setPrefs)
+let COLS={};if(!CLOUD){try{COLS=JSON.parse(localStorage.getItem(SKEY_COLS)||'{}')||{}}catch(e){}}
+const colCfg=mode=>COLS[mode]||(COLS[mode]={o:[],h:[]});
+function saveCols(){
+  for(const m of Object.keys(COLS)){const c=COLS[m];if(!c.o.length&&!c.h.length) delete COLS[m]}
+  if(!CLOUD){try{localStorage.setItem(SKEY_COLS,JSON.stringify(COLS))}catch(e){}return}
+  if(window.EduLOGCloud&&window.EduLOGCloud.savePref) window.EduLOGCloud.savePref('cols',COLS);
+}
+const colsOwn=mode=>!!(COLS[mode]&&(COLS[mode].o.length||COLS[mode].h.length));
+function applyColOrd(mode,cols){
+  const o=(COLS[mode]&&COLS[mode].o)||[];if(!o.length) return cols;
+  const ix=new Map(o.map((k,i)=>[k,i]));
+  // новых в сохранённом порядке нет — они идут в конце, в обычном порядке
+  return cols.map((k,i)=>[k,ix.has(k)?ix.get(k):1e6+i]).sort((a,b)=>a[1]-b[1]).map(x=>x[0]);
+}
+// all — все столбцы по порядку, включая скрытые; to — перед каким поставить (null — в конец)
+function moveCol(mode,all,from,to){
+  const a=all.slice();const i=a.indexOf(from);if(i<0) return;a.splice(i,1);
+  let j=to==null?a.length:a.indexOf(to);if(j<0) j=a.length;a.splice(j,0,from);colCfg(mode).o=a;saveCols();render();
+}
+function hideCol(mode,k,on){const c=colCfg(mode);c.h=c.h.filter(x=>x!==k);if(on) c.h.push(k);saveCols();render()}
+let GRIDALL=[];
+function colLabel(mode,k){return mode==='group'?gShow(k):mode==='teacher'?tShow(k):rShow(k)}
+function userName(){const n=window.EduLOGCloud&&window.EduLOGCloud.userName&&window.EduLOGCloud.userName();return n||''}
+function colBar(mode,all,hidden){
+  const who=userName();
+  const note=`<p class="co-note">${who?`Порядок и скрытые столбцы сохраняются только для пользователя <b>${esc(who)}</b>.`:'Порядок и скрытые столбцы сохраняются только в этом браузере.'} У остальных пользователей прежний порядок, все столбцы видны.</p>`;
+  const hid=hidden.length?`<div class="co-hid"><span class="eyebrow">Скрыто: ${hidden.length}</span><span class="note">${hidden.map(k=>esc(colLabel(mode,k))).join(', ')}</span><button class="link sm" data-colshowall>показать все</button></div>`:'';
+  if(!st.colEdit) return (colsOwn(mode)?`<div class="co-info">Свой порядок столбцов${hidden.length?`, скрыто: ${hidden.length}`:''} (видно только вам).</div>`:'');
+  return `<section class="panel colord" aria-label="Настройка столбцов"><h2>Настройка столбцов<span class="sp"></span>${colsOwn(mode)?'<button class="link sm" data-colreset>вернуть обычный порядок</button>':''}<button class="btn sm" data-coledit>Готово</button></h2>
+    <p class="note">Стрелки над названием двигают столбец влево и вправо, глазик показывает или скрывает его (скрытые здесь бледные, после «Готово» исчезнут). Заголовок столбца можно перетащить мышкой на новое место.</p>${note}${hid}</section>`;
+}
+/* сводная таблица недели: столбцы — все группы / преподаватели / аудитории, строки — пары по дням */
+function renderGrid(w,mode){
+  const cs=cards(w.recs,mode);
+  const keysOf=c=>mode==='group'?c.groups:mode==='teacher'?c.teachers.map(t=>t.key):c.rooms;
+  const cell=new Map();
+  cs.forEach(c=>keysOf(c).forEach(k=>{const id=k+'|'+c.day+'|'+c.period;(cell.get(id)||cell.set(id,[]).get(id)).push(c)}));
+  let cols=[...new Set(cs.flatMap(keysOf))];
+  if(mode==='group') cols.sort((a,b)=>(REG.courses[a]||99)-(REG.courses[b]||99)||coll.compare(gShow(a),gShow(b)));
+  else if(mode==='teacher') cols.sort((a,b)=>coll.compare(tShow(a),tShow(b)));
+  else cols.sort(cmpRooms);
+  cols=applyColOrd(mode,cols);GRIDALL=cols;
+  const hidden=cols.filter(k=>colCfg(mode).h.includes(k));const isOff=k=>hidden.includes(k);if(!st.colEdit) cols=cols.filter(k=>!isOff(k));
+  const days=[...new Set(w.recs.map(r=>r.day))].sort((a,b)=>a-b);
   let conf=0;
-  const headR=rooms.map(r=>{const p=NAMES.room.has(r)?{code:rShow(r),owner:''}:roomParts(r);return `<th scope="col"><button class="link" data-go="room" data-key="${esc(r)}" title="${esc(r)}"><b>${esc(p.code)}</b></button>${p.owner?`<small>${esc(p.owner)}</small>`:''}</th>`}).join('');
-  let body='';
-  for(let d=1;d<=6;d++) for(let p=1;p<=w.maxP;p++){
-    const tm=w.times[p]||['',''];
-    const tds=rooms.map(r=>{const its=cell.get(r+'|'+d+'|'+p)||[];if(!its.length) return '<td></td>';
-      const bad=its.length>1&&/^\d/.test(r);if(bad) conf++;
-      if(its.length>3) return `<td class="busy"><div class="occ" title="${esc(its.map(c=>c.groups.join(', ')+' — '+dShow(c.subject)).join('\n'))}"><span>${its.flatMap(c=>c.groups).map(linkG).join(', ')}</span><small>${its.length} ${plural(its.length,'занятие','занятия','занятий')}</small></div></td>`;
-      return `<td class="${bad?'conf':'busy'}">${its.map(c=>`<div class="occ" title="${esc(dShow(c.subject))}"><span>${c.groups.map(linkG).join(', ')}</span><small>${esc(c.teachers.map(t=>tShow(t.key)).join(', ')||'—')}</small></div>`).join('')}</td>`}).join('');
-    body+=`<tr class="${p===1&&d>1?'ds':''}">${p===1?`<th class="rg-d" rowspan="${w.maxP}" scope="rowgroup"><span>${DAYS[d-1]} ${esc(w.dates[d]||'')}</span></th>`:''}<th class="rg-p" scope="row"><b>${p}</b> ${esc(tm[0])}</th>${tds}</tr>`;
+  const clash=(its,k)=>{
+    if(its.length<2) return false;
+    if(mode==='group'){const sg=its.map(c=>c.subgroup||0);return sg.includes(0)||new Set(sg).size<sg.length}
+    if(mode==='room') return /^\d/.test(k);
+    return true;
+  };
+  const tz=c=>c.zach?'<span class="ctag z">Зачёт</span>':'';
+  const occ=c=>{
+    const T=c.teachers.map(t=>linkT(t)).join(', '),R=c.rooms.map(linkR).join(', '),G=c.groups.map(linkG).join(', ');
+    const S=`<span class="s" title="${esc(c.subject)}">${esc(dShow(c.subject))}</span>`;
+    const sg=c.subgroup?`<span class="tag">${sgText(c.subgroup)}</span>`:'';
+    if(mode==='group') return `<div class="occ">${tz(c)}${S}<small>${T||'—'}${R?' · '+R:''} ${sg}</small></div>`;
+    if(mode==='teacher') return `<div class="occ"><span class="g">${G} ${sg}</span>${tz(c)}${S}<small>${R||'—'}</small></div>`;
+    return `<div class="occ"><span class="g">${G} ${sg}</span><small>${T||'—'}</small></div>`;
+  };
+  const EYE='<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+  const EYE_OFF='<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.6 5.1A10.4 10.4 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6A17.4 17.4 0 0 0 2 12s3.6 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="M2 2l20 20"/></svg>';
+  const td=(k,d,p)=>{
+    if(isOff(k)) return '<td class="off"></td>';
+    const its=cell.get(k+'|'+d+'|'+p)||[];if(!its.length) return '<td></td>';
+    const bad=clash(its,k);if(bad) conf++;
+    if(mode==='room'&&its.length>3) return `<td class="busy"><div class="occ" title="${esc(its.map(c=>c.groups.join(', ')+' — '+dShow(c.subject)).join('\n'))}"><span>${its.flatMap(c=>c.groups).map(linkG).join(', ')}</span><small>${its.length} ${plural(its.length,'занятие','занятия','занятий')}</small></div></td>`;
+    // у группы 1 и 2 подгруппа — рядом, как в карточках
+    if(mode==='group'&&!bad&&its.every(c=>c.subgroup)){
+      const by=n=>its.filter(c=>c.subgroup===n);
+      return `<td class="busy"><div class="sgs"><div>${by(1).map(occ).join('')}</div><div>${its.filter(c=>c.subgroup!==1).map(occ).join('')}</div></div></td>`;
+    }
+    return `<td class="${bad?'conf':'busy'}">${its.map(occ).join('')}</td>`;
+  };
+  const ctl=k=>{if(!st.colEdit) return '';const i=cols.indexOf(k);
+    return `<div class="co-ctl"><button class="arrow xs" data-colmv="-1" data-k="${esc(k)}" aria-label="Левее"${i?'':' disabled'}>←</button><button class="arrow xs eye${isOff(k)?' is-off':''}" data-colhide="${esc(k)}" aria-pressed="${!isOff(k)}" aria-label="${isOff(k)?'Показать столбец':'Скрыть столбец'}" title="${isOff(k)?'Не видно — показать':'Видно — скрыть'}">${isOff(k)?EYE_OFF:EYE}</button><button class="arrow xs" data-colmv="1" data-k="${esc(k)}" aria-label="Правее"${i<cols.length-1?'':' disabled'}>→</button></div>`};
+  const headCell=k=>{
+    if(mode==='room'){const p=NAMES.room.has(k)?{code:rShow(k),owner:''}:roomParts(k);return `<th scope="col" draggable="true" data-col="${esc(k)}"${isOff(k)?' class="off"':''}>${ctl(k)}<button class="link" data-go="room" data-key="${esc(k)}" title="${esc(k)}"><b>${esc(p.code)}</b></button>${p.owner?`<small>${esc(p.owner)}</small>`:''}</th>`}
+    if(mode==='teacher') return `<th scope="col" draggable="true" data-col="${esc(k)}"${isOff(k)?' class="off"':''}>${ctl(k)}<button class="link" data-go="teacher" data-key="${esc(k)}" title="${esc(tName(k))}"><b>${esc(tShow(k))}</b></button></th>`;
+    return `<th scope="col" draggable="true" data-col="${esc(k)}"${isOff(k)?' class="off"':''}>${ctl(k)}<button class="link" data-go="group" data-key="${esc(k)}" title="${esc(k)}"><b>${esc(gShow(k))}</b></button></th>`;
+  };
+  // у групп над шапкой — строка курсов
+  let pre='';
+  if(mode==='group'){
+    const runs=[];cols.forEach(k=>{const c=REG.courses[k]||0;const l=runs[runs.length-1];if(l&&l.c===c) l.n++;else runs.push({c,n:1})});
+    pre=`<tr class="rg-c"><th class="rg-d"></th><th class="rg-p"></th>${runs.map(r=>`<th colspan="${r.n}" scope="colgroup"><span>${r.c?r.c+' курс':'без курса'}</span></th>`).join('')}</tr>`;
   }
-  $('#main').innerHTML=`<section class="head"><div class="head-l"><span class="eyebrow">Сетка занятости</span><h1>Все аудитории</h1></div>${weekNav(w)}</section>
-    <dl class="stats"><div class="stat"><dt>Аудиторий</dt><dd>${rooms.length}</dd></div><div class="stat"><dt>Занятий</dt><dd>${cs.length}</dd></div>${conf?`<div class="stat bad"><dt>Накладки</dt><dd>${conf}</dd></div>`:''}</dl>
-    <div class="legend"><span>Наведите на группу, чтобы увидеть дисциплину</span><span>Клик по номеру — расписание аудитории</span></div>
-    <div class="rg-wrap"><table class="rg"><thead><tr><th class="rg-d" scope="col">День</th><th class="rg-p" scope="col">Пара</th>${headR}</tr></thead><tbody>${body}</tbody></table></div>`;
+  let body='';
+  for(const d of days) for(let p=1;p<=w.maxP;p++){
+    const tm=w.times[p]||['',''];
+    body+=`<tr class="${p===1&&d!==days[0]?'ds':''}">${p===1?`<th class="rg-d" rowspan="${w.maxP}" scope="rowgroup"><span>${DAYS[d-1]} ${esc(w.dates[d]||'')}</span></th>`:''}<th class="rg-p" scope="row"><b>${p}</b> ${esc(tm[0])}</th>${cols.map(k=>td(k,d,p)).join('')}</tr>`;
+  }
+  const what={group:['Групп','Все группы'],teacher:['Преподавателей','Все преподаватели'],room:['Аудиторий','Все аудитории']}[mode];
+  $('#main').innerHTML=`<section class="head"><div class="head-l"><span class="eyebrow">Сводная таблица</span><h1>${what[1]}</h1>${st.colEdit?'':`<div class="co-bar"><button class="btn ghost sm" data-coledit>⇄ Настроить столбцы</button></div>`}</div>${weekNav(w)}</section>${colBar(mode,GRIDALL,hidden)}
+    <dl class="stats"><div class="stat"><dt>${what[0]}</dt><dd>${GRIDALL.length-hidden.length}${hidden.length?` <small>из ${GRIDALL.length}</small>`:''}</dd></div><div class="stat"><dt>Занятий</dt><dd>${cs.length}</dd></div>${conf?`<div class="stat bad"><dt>Накладки</dt><dd>${conf}</dd></div>`:''}</dl>
+    <div class="legend"><span>Столбцы — ${what[1].toLowerCase()}, строки — пары по дням недели</span><span>Клик по заголовку столбца — его расписание, перетаскивание — порядок столбцов</span><span>Красным — накладки</span></div>
+    <div class="rg-wrap"><table class="rg rg-${mode}${st.colEdit?' co-edit':''}"><thead>${pre}<tr><th class="rg-d" scope="col">День</th><th class="rg-p" scope="col">Пара</th>${cols.map(headCell).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
 /* ---------- Отображение изменений ---------- */
@@ -1154,6 +1239,7 @@ function closePreview(){$('#modal').hidden=true;document.body.classList.remove('
 /* ---------- Отрисовка ---------- */
 function render(){
   if(VIEW_ONLY&&st.view!=='sched'&&st.view!=='admin') st.view='sched';
+  if(VIEW_ONLY&&st.mode!=='group') st.mode='group';
   renderTabs();
   document.body.classList.toggle('v-admin',st.view==='admin');
   document.body.classList.toggle('v-dict',st.view==='dict');
@@ -1233,9 +1319,9 @@ addEventListener('dragover',e=>e.preventDefault());
 addEventListener('drop',e=>{e.preventDefault();dragN=0;$('#drop').hidden=true;openFiles([...e.dataTransfer.files])});
 
 /* ---------- Навигация ---------- */
-function go(mode,key){st.mode=mode;st.key[mode]=key;st.q='';$('#q').value='';closePreview();render();scrollTo({top:0})}
+function go(mode,key){if(VIEW_ONLY&&mode!=='group') return;st.mode=mode;st.key[mode]=key;st.q='';$('#q').value='';closePreview();render();scrollTo({top:0})}
 document.querySelector('.seg').addEventListener('click',e=>{const b=e.target.closest('[data-view]');if(!b) return;st.view=b.dataset.view;render()});
-document.querySelector('.tabs').addEventListener('click',e=>{const b=e.target.closest('.tab');if(!b) return;st.mode=b.dataset.mode;st.q='';$('#q').value='';render()});
+document.querySelector('.tabs').addEventListener('click',e=>{const b=e.target.closest('.tab');if(!b||b.hidden) return;st.mode=b.dataset.mode;st.q='';$('#q').value='';render()});
 $('#list').addEventListener('click',e=>{const b=e.target.closest('.item');if(!b) return;st.key[st.mode]=b.dataset.key;render();if(innerWidth<=820) $('#main').scrollIntoView({behavior:'smooth'})});
 $('#q').addEventListener('input',e=>{st.q=e.target.value;renderList()});
 document.addEventListener('input',e=>{if(e.target.id==='dq'){st.dq=e.target.value;fillDict()}});
@@ -1255,12 +1341,21 @@ function movePropBy(id,d){
 }
 document.addEventListener('click',e=>{
   const g=e.target.closest('[data-go]');if(g){go(g.dataset.go,g.dataset.key);return}
+  if(e.target.closest('[data-coledit]')){st.colEdit=!st.colEdit;render();return}
+  if(e.target.closest('[data-colreset]')){delete COLS[st.mode];saveCols();render();return}
+  const ch=e.target.closest('[data-colhide]');if(ch){hideCol(st.mode,ch.dataset.colhide,!colCfg(st.mode).h.includes(ch.dataset.colhide));return}
+  const cv=e.target.closest('[data-colshow]');if(cv){hideCol(st.mode,cv.dataset.colshow,false);return}
+  if(e.target.closest('[data-colshowall]')){colCfg(st.mode).h=[];saveCols();render();return}
+  const cm=e.target.closest('[data-colmv]');if(cm){
+    // соседний видимый столбец — через скрытые перешагиваем
+    const h=st.colEdit?[]:colCfg(st.mode).h,vis=GRIDALL.filter(k=>!h.includes(k)),k=cm.dataset.k,i=vis.indexOf(k),d=+cm.dataset.colmv,nb=vis[i+d];if(i<0||!nb) return;
+    const all=GRIDALL;moveCol(st.mode,all,k,d<0?nb:(all[all.indexOf(nb)+1]??null));return}
   const s=e.target.closest('[data-step]');
   if(s){const ps=LIST.filter(i=>i.present&&!i.all);if(ps.length<2) return;const i=ps.findIndex(x=>x.key===st.key[st.mode]);
     st.key[st.mode]=ps[((i<0?0:i)+(+s.dataset.step)+ps.length)%ps.length].key;render();return}
   const wk=e.target.closest('[data-wk]');if(wk&&SCHED){st.wi=Math.max(0,Math.min(SCHED.weeks.length-1,st.wi+(+wk.dataset.wk)));render();return}
   const gw=e.target.closest('[data-gowk]');if(gw&&SCHED){const i=SCHED.weeks.findIndex(x=>x.key===gw.dataset.gowk);if(i<0){toast('Этой недели уже нет в базе.',true);return}
-    st.wi=i;st.view='sched';if(st.key[st.mode]==='*'&&st.mode!=='room') st.key[st.mode]=null;closePreview();render();scrollTo({top:0});return}
+    st.wi=i;st.view='sched';closePreview();render();scrollTo({top:0});return}
   if(e.target.closest('[data-seenall]')){setSeen(PANEL_FRESH,true);return}
   const vg=e.target.closest('[data-view-go]');if(vg){st.view=vg.dataset.viewGo;if(vg.dataset.dtabGo) st.dtab=vg.dataset.dtabGo;closePropMenu();render();scrollTo({top:0});return}
   const pb=e.target.closest('[data-prow]');if(pb){if(!PMENU.hidden&&PMENU.dataset.row===pb.dataset.prow) closePropMenu();else openPropMenu(pb);return}
@@ -1293,10 +1388,17 @@ document.addEventListener('change',e=>{
   }
   const z=e.target.closest('[data-zc]');if(z) setFlag(z.dataset.zg.split('\n'),z.dataset.zc,z.checked);
 });
+let DRAGCOL=null;
+document.addEventListener('dragstart',e=>{const c=e.target.closest&&e.target.closest('[data-col]');if(!c) return;DRAGCOL=c.dataset.col;e.dataTransfer.effectAllowed='move';try{e.dataTransfer.setData('text/plain',DRAGCOL)}catch(_){}c.classList.add('dragging')});
+document.addEventListener('dragover',e=>{if(DRAGCOL==null) return;const c=e.target.closest&&e.target.closest('[data-col]');if(!c) return;e.preventDefault();
+  document.querySelectorAll('.drop-to').forEach(x=>x!==c&&x.classList.remove('drop-to'));c.classList.add('drop-to');c.classList.toggle('drop-r',GRIDALL.indexOf(DRAGCOL)<GRIDALL.indexOf(c.dataset.col))});
+document.addEventListener('drop',e=>{if(DRAGCOL==null) return;const c=e.target.closest&&e.target.closest('[data-col]');e.preventDefault();
+  const from=DRAGCOL;DRAGCOL=null;if(c&&c.dataset.col!==from){const A=GRIDALL,t=c.dataset.col;moveCol(st.mode,A,from,A.indexOf(from)<A.indexOf(t)?(A[A.indexOf(t)+1]??null):t)}else render()});
+document.addEventListener('dragend',()=>{if(DRAGCOL!=null){DRAGCOL=null;render()}});
 document.addEventListener('contextmenu',e=>{
   if(st.view!=='sched'||!SCHED) return;
   const g=e.target.closest('[data-go]');if(!g) return;
-  e.preventDefault();openPreview(g.dataset.go,g.dataset.key);
+  e.preventDefault();if(VIEW_ONLY&&g.dataset.go!=='group') return;openPreview(g.dataset.go,g.dataset.key);
 });
 $('#modalOpen').addEventListener('click',()=>{if(PREV) go(PREV.mode,PREV.key)});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#modal').hidden) closePreview()});
@@ -1622,6 +1724,8 @@ window.EduLOG={
   zachetPos,zachetMoves,
   // Словари из таблиц dict_names / props / row_props
   setDict,
+  // личные настройки пользователя из таблицы user_prefs
+  setPrefs(p){const c=p&&p.cols;COLS=c&&typeof c==='object'&&!Array.isArray(c)?c:{};for(const m of Object.keys(COLS)){const v=COLS[m];if(!v||!Array.isArray(v.o)||!Array.isArray(v.h)) delete COLS[m]}},
   refresh(){buildRegistry();closePreview();render()},
 };
 if(!CLOUD){

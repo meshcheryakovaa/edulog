@@ -129,16 +129,42 @@ async function saveSeen(keys,on){
   }
   await Promise.all([...by].map(([id,cs])=>api('/rest/v1/sched_seen?user_id=eq.'+q(ME.id)+'&upload_id=eq.'+id+'&ckey=in.'+q(inList(cs)),{method:'DELETE',headers:{Prefer:'return=minimal'}})));
 }
+// Личные настройки (таблица user_prefs): порядок и скрытые столбцы сводной таблицы
+let PREFS_DB=true; // false — таблицы ещё нет: настройки хранятся только в этом браузере
+const prefLocalKey=k=>'edulog-pref:'+(ME?ME.id:'')+':'+k;
+async function fetchPrefs(){
+  if(!ME) return {};
+  try{
+    const r=await api('/rest/v1/user_prefs?select=key,value&user_id=eq.'+q(ME.id));
+    PREFS_DB=true;const o={};(r||[]).forEach(x=>{o[x.key]=x.value});return o;
+  }catch(e){
+    if(!missingTable(e)) throw e;
+    PREFS_DB=false;const o={};try{const v=localStorage.getItem(prefLocalKey('cols'));if(v) o.cols=JSON.parse(v)}catch(_){}return o;
+  }
+}
+const prefTimers={};
+function savePref(key,value){
+  if(!ME) return;
+  try{localStorage.setItem(prefLocalKey(key),JSON.stringify(value))}catch(_){}
+  if(!PREFS_DB) return;
+  // частые перестановки столбцов отправляем одной записью
+  clearTimeout(prefTimers[key]);
+  prefTimers[key]=setTimeout(()=>{
+    api('/rest/v1/user_prefs?on_conflict=user_id,key',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:[{user_id:ME.id,key,value,updated_at:new Date().toISOString()}]})
+      .catch(e=>{if(missingTable(e)) PREFS_DB=false;else A.toast('Не удалось сохранить порядок столбцов: '+(e&&e.message||e),true)});
+  },600);
+}
 function schedMeta(rows,ups){
   const u=ups[0];
   return {name:(ups.find(x=>x.file)||{}).file||'',updated_at:u.at,author:u.author,ver:u.id,weeks:rows.length,size:rows.reduce((a,r)=>a+(r.content||'').length,0)};
 }
 async function loadData(){
-  const [ds,zs,sd,dc]=await Promise.all([
+  const [ds,zs,sd,dc,pf]=await Promise.all([
     api('/rest/v1/datasets?select=kind,name,content,author,updated_at,size'),
     api('/rest/v1/zachety?select=grp,code'),
     fetchSched(),
     fetchDict(),
+    fetchPrefs().catch(()=>({})),
   ]);
   A.clear();META={};
   for(const d of ds||[]){
@@ -151,6 +177,7 @@ async function loadData(){
   pushSeen(sd?await fetchSeen(sd.ups).catch(()=>[]):[]);
   A.setFlags(zs||[]);
   A.setDict(dc||{});
+  A.setPrefs(pf||{});
   A.refresh();
   if(!SCHED_DB&&canEdit()) A.toast(SCHEMA_HINT,true);
   else if(!DICT_DB&&canEdit()) A.toast(DICT_HINT,true);
@@ -594,7 +621,7 @@ document.addEventListener('change',e=>{
 });
 
 /* ---------- Экспорт для app.js ---------- */
-window.EduLOGCloud={saveFlag,saveFlags,saveDict,saveSeen,isAdmin,renderAdmin,onSources};
+window.EduLOGCloud={userName:()=>ME?(ME.full_name||ME.email||''):'',saveFlag,saveFlags,saveDict,saveSeen,savePref,isAdmin,renderAdmin,onSources};
 
 /* ---------- Старт ---------- */
 (async()=>{

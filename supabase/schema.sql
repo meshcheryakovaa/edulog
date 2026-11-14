@@ -437,6 +437,31 @@ create trigger profiles_audit after insert or update or delete on public.profile
   for each row execute function public.audit();
 
 -- ---------- Права для API ----------
+-- ---------- Личные настройки ----------
+-- Настройки, которые каждый пользователь задаёт для себя (порядок и скрытые столбцы
+-- сводной таблицы и т. п.). Другие пользователи их не видят и не меняют.
+-- key = 'cols': {group|teacher|room: {o: [порядок столбцов], h: [скрытые]}}.
+create table if not exists public.user_prefs (
+  user_id     uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  key         text not null check (length(key) <= 100),
+  value       jsonb not null default '{}'::jsonb,
+  updated_at  timestamptz not null default now(),
+  primary key (user_id, key)
+);
+alter table public.user_prefs enable row level security;
+drop policy if exists user_prefs_select on public.user_prefs;
+create policy user_prefs_select on public.user_prefs for select to authenticated
+  using (user_id = auth.uid() and public.can_read());
+drop policy if exists user_prefs_insert on public.user_prefs;
+create policy user_prefs_insert on public.user_prefs for insert to authenticated
+  with check (user_id = auth.uid() and public.can_read());
+drop policy if exists user_prefs_update on public.user_prefs;
+create policy user_prefs_update on public.user_prefs for update to authenticated
+  using (user_id = auth.uid()) with check (user_id = auth.uid() and public.can_read());
+drop policy if exists user_prefs_delete on public.user_prefs;
+create policy user_prefs_delete on public.user_prefs for delete to authenticated
+  using (user_id = auth.uid());
+
 grant usage on schema public to anon, authenticated;
 grant select, update on public.profiles to authenticated;
 grant select, insert, update, delete on public.datasets to authenticated;
@@ -444,8 +469,9 @@ grant select, insert, update, delete on public.zachety to authenticated;
 grant select, insert, update, delete on public.sched_weeks to authenticated;
 grant select, insert on public.sched_uploads to authenticated;
 grant select, insert, delete on public.sched_seen to authenticated;
+grant select, insert, update, delete on public.user_prefs to authenticated;
 grant select, insert, update on public.app_state to authenticated;
 grant select, insert, update, delete on public.dict_names, public.props, public.row_props to authenticated;
 grant select on public.audit_log to authenticated;
-revoke all on public.profiles, public.datasets, public.zachety, public.audit_log, public.sched_weeks, public.sched_uploads, public.sched_seen, public.app_state,
+revoke all on public.profiles, public.datasets, public.zachety, public.audit_log, public.sched_weeks, public.sched_uploads, public.sched_seen, public.app_state, public.user_prefs,
   public.dict_names, public.props, public.row_props from anon;
