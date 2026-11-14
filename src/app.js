@@ -271,12 +271,6 @@ function weekUnseen(wk){
   }
   return out;
 }
-/* последнее изменение недели: подсветка карточек в расписании */
-function weekLastUpload(k){
-  if(!SCHED) return null;
-  for(const e of SCHED.history){const w=e.weeks.find(x=>x.k===k);if(w) return w.st==='upd'?{e,w,ch:e.ch[k]||[]}:null}
-  return null;
-}
 /* кто затронут: множества групп, преподавателей и аудиторий */
 function touched(list){
   const T={group:new Set(),teacher:new Set(),room:new Set()};
@@ -798,7 +792,7 @@ function lessonCard(c,mode,w,compact){
   const cls='ls'+(c.subgroup?' sub':'')+(c.conf?' conf':'')+(c.zach?' zach':'')+(c.chg?' ch-'+c.chg:'')+(compact?' compact':'');
   const was=c.was&&c.was.length?' Было: '+c.was.map(it=>[it.s,it.t.join(', '),it.r.join(', '),it.tm].filter(Boolean).join(' · ')).join('; '):'';
   const zt=(c.zach?'<span class="ztag" title="Последняя пара зачётной дисциплины">Зачёт</span>':'')+
-    (c.chg?`<span class="ctag ${c.chg}" title="${esc((c.chg==='add'?'Добавлено':'Изменено')+' при последней загрузке этой недели.'+was)}">${c.chg==='add'?'Новое':'Изменено'}</span>`:'');
+    (c.chg?`<span class="ctag ${c.chg}" title="${esc((c.chg==='add'?'Добавлено':'Изменено')+' — изменение ещё не просмотрено.'+was)}">${c.chg==='add'?'Новое':'Изменено'}</span>`:'');
   const conf=c.conf?`<span class="tag warn">накладка</span>`:'';
   if(mode==='group') return `<div class="${cls}">${zt}<div class="ls-s" title="${esc(c.subject)}">${esc(dShow(c.subject))}</div><div class="ls-m">${T}<span>${R}</span>${sg}${odd}${conf}</div></div>`;
   const grp=`<div class="ls-g">${c.groups.map(linkG).join('')}</div>`;
@@ -874,7 +868,7 @@ function renderSched(key){
   const chp=entityChangesPanel(mode,key,{week:w.key,quiet:true});
   if(!recs.length){main.innerHTML=head+emptyCard('Нет занятий',`На этой неделе в расписании нет занятий: ${esc(label(mode,key))}.`)+chp+(VIEW_ONLY?'':reconPanel(mode,key,w));return}
   main.innerHTML=head+`<dl class="stats">${stats}</dl>
-    <div class="legend">${VIEW_ONLY?'':'<span>Клик по преподавателю, аудитории или группе открывает её расписание</span><span>Правый клик — быстрый просмотр недели</span>'}<span>Во всю ширину — вся группа, слева — 1 подгруппа, справа — 2 подгруппа</span>${chn?'<span>«Новое», «Изменено», «Отменено» — по последней загрузке этой недели</span>':''}</div>
+    <div class="legend">${VIEW_ONLY?'':'<span>Клик по преподавателю, аудитории или группе открывает её расписание</span><span>Правый клик — быстрый просмотр недели</span>'}<span>Во всю ширину — вся группа, слева — 1 подгруппа, справа — 2 подгруппа</span>${chn?'<span>«Новое», «Изменено», «Отменено» — непросмотренные изменения этой недели по всем загрузкам</span>':''}</div>
     ${weekTable(cs,mode,w,false,ghosts)}${chp}${mode!=='room'&&!VIEW_ONLY?reconPanel(mode,key,w):''}`;
 }
 /* столбцы сводной таблицы: порядок и скрытые — свои у каждого пользователя.
@@ -925,7 +919,7 @@ function renderGrid(w,mode){
   cols=applyColOrd(mode,cols);GRIDALL=cols;
   const hidden=cols.filter(k=>colCfg(mode).h.includes(k));const isOff=k=>hidden.includes(k);if(!st.colEdit) cols=cols.filter(k=>!isOff(k));
   const days=[...new Set(w.recs.map(r=>r.day))].sort((a,b)=>a-b);
-  // «Новое», «Изменено», «Отменено» по последней загрузке недели — как в расписании одного; просмотренное не подсвечиваем
+  // «Новое», «Изменено», «Отменено» — непросмотренные изменения недели, как в расписании одного
   const ghost=new Map();
   for(const k of GRIDALL) for(const g of markChanges(cs,mode,k,w)){const id=k+'|'+g.day+'|'+g.period;(ghost.get(id)||ghost.set(id,[]).get(id)).push(g)}
   let conf=0;
@@ -936,10 +930,10 @@ function renderGrid(w,mode){
     return true;
   };
   const tz=c=>(c.zach?'<span class="ctag z" title="Последняя пара зачётной дисциплины">Зачёт</span>':'')+
-    (c.chg?`<span class="ctag ${c.chg}" title="${esc((c.chg==='add'?'Добавлено':'Изменено')+' при последней загрузке этой недели.'+(c.was&&c.was.length?' Было: '+c.was.map(it=>[it.s,it.t.join(', '),it.r.join(', '),it.tm].filter(Boolean).join(' · ')).join('; '):''))}">${c.chg==='add'?'Новое':'Изменено'}</span>`:'');
+    (c.chg?`<span class="ctag ${c.chg}" title="${esc((c.chg==='add'?'Добавлено':'Изменено')+' — изменение ещё не просмотрено.'+(c.was&&c.was.length?' Было: '+c.was.map(it=>[it.s,it.t.join(', '),it.r.join(', '),it.tm].filter(Boolean).join(' · ')).join('; '):''))}">${c.chg==='add'?'Новое':'Изменено'}</span>`:'');
   const gone=g=>{const it=g.it,T=it.t.map(tShowRaw).join(', '),R=it.r.map(rShow).join(', ');
     const meta=mode==='group'?[T,R]:mode==='teacher'?[gShow(g.group),R]:[gShow(g.group),T];
-    return `<div class="occ gone" title="Отменено при последней загрузке этой недели"><span class="ctag del">Отменено</span><span class="s" title="${esc(it.s)}">${esc(dShow(it.s))}</span><small>${esc(meta.filter(Boolean).join(' · ')||'—')}${g.subgroup?' · '+sgText(g.subgroup):''}</small></div>`};
+    return `<div class="occ gone" title="Отменено — изменение ещё не просмотрено"><span class="ctag del">Отменено</span><span class="s" title="${esc(it.s)}">${esc(dShow(it.s))}</span><small>${esc(meta.filter(Boolean).join(' · ')||'—')}${g.subgroup?' · '+sgText(g.subgroup):''}</small></div>`};
   const occ=c=>{
     const T=c.teachers.map(t=>linkT(t)).join(', '),R=c.rooms.map(linkR).join(', '),G=c.groups.map(linkG).join(', ');
     const S=`<span class="s" title="${esc(c.subject)}">${esc(dShow(c.subject))}</span>`;
@@ -984,7 +978,7 @@ function renderGrid(w,mode){
   const what={group:['Групп','Все группы'],teacher:['Преподавателей','Все преподаватели'],room:['Аудиторий','Все аудитории']}[mode];
   $('#main').innerHTML=`<section class="head"><div class="head-l"><span class="eyebrow">Сводная таблица</span><h1>${what[1]}</h1>${st.colEdit?'':`<div class="co-bar"><button class="btn ghost sm" data-coledit>⇄ Настроить столбцы</button></div>`}</div>${weekNav(w)}</section>${colBar(mode,GRIDALL,hidden)}
     <dl class="stats"><div class="stat"><dt>${what[0]}</dt><dd>${GRIDALL.length-hidden.length}${hidden.length?` <small>из ${GRIDALL.length}</small>`:''}</dd></div><div class="stat"><dt>Занятий</dt><dd>${cs.length}</dd></div>${conf?`<div class="stat bad"><dt>Накладки</dt><dd>${conf}</dd></div>`:''}</dl>
-    <div class="legend"><span>Столбцы — ${what[1].toLowerCase()}, строки — пары по дням недели</span><span>Клик по заголовку столбца — его расписание, перетаскивание — порядок столбцов</span><span>Красным — накладки</span><span>«Новое», «Изменено», «Отменено» — по последней загрузке недели, после отметки «просмотрено» метка исчезает</span></div>
+    <div class="legend"><span>Столбцы — ${what[1].toLowerCase()}, строки — пары по дням недели</span><span>Клик по заголовку столбца — его расписание, перетаскивание — порядок столбцов</span><span>Красным — накладки</span><span>«Новое», «Изменено», «Отменено» — непросмотренные изменения недели по всем загрузкам, после отметки «просмотрено» метка исчезает</span></div>
     <div class="rg-wrap"><table class="rg rg-${mode}${st.colEdit?' co-edit':''}"><thead>${pre}<tr><th class="rg-d" scope="col">День</th><th class="rg-p" scope="col">Пара</th>${cols.map(headCell).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
@@ -1068,14 +1062,36 @@ function entityChangesPanel(mode,key,opt){
   const oldHtml=old.length?`<details class="more seen-g"><summary>Просмотренные (${old.length})</summary>${changesTable(old,mode,opt)}</details>`:'';
   return `<section class="panel chg-p" aria-label="${title}"><h2>${title}<span class="cks">${pills}</span>${allBtn}${VIEW_ONLY?'':'<button class="link sm" data-view-go="changes">весь журнал →</button>'}</h2>
     ${freshHtml}${oldHtml}
-    <p class="note">${opt.week?'Сравнение с тем, что было в базе до последней загрузки этой недели.':'По журналу загрузок расписания, новые сверху. Каждая загрузка заменяет только недели из своего файла.'}</p></section>`;
+    <p class="note">${opt.week?'Все загрузки этой недели, новые сверху. Метки в сетке держатся, пока изменение не отмечено просмотренным.':'По журналу загрузок расписания, новые сверху. Каждая загрузка заменяет только недели из своего файла.'}</p></section>`;
 }
-/* подсветка в сетке недели: что добавлено/изменено, и «призраки» отменённых занятий */
+/* непросмотренные изменения недели по всем загрузкам, сведённые по месту (группа, день, пара, подгруппа):
+   было — до самого раннего непросмотренного изменения, стало — после последней загрузки.
+   Загрузка недели заново («новая неделя») или её удаление обрывает историю. */
+let SLOTMEMO={k:'',v:[]};
+function weekSlotChanges(wk){
+  if(!SCHED||!wk) return [];
+  const mk=wk+'|'+FVER+'|'+SCHED.history.length+'|'+SEEN.size+'|'+CAN_SEEN;if(SLOTMEMO.k===mk) return SLOTMEMO.v;
+  const by=new Map();
+  for(const e of SCHED.history){
+    const w=e.weeks.find(x=>x.k===wk);if(!w) continue;
+    if(w.st==='new'||w.st==='del') break;
+    if(w.st!=='upd') continue;
+    for(const c of e.ch[wk]||[]){const id=[c.g,c.d,c.p,c.sg||0].join('|');(by.get(id)||by.set(id,[]).get(id)).push({e,w,c})}
+  }
+  const same=(x,y)=>JSON.stringify(x.map(i=>[i.s,i.t,i.r,i.tm]).sort())===JSON.stringify(y.map(i=>[i.s,i.t,i.r,i.tm]).sort());
+  const out=[];
+  for(const list of by.values()){ // в списке новые сверху
+    const fresh=list.filter(r=>!isSeen(r));if(!fresh.length) continue;
+    const top=list[0].c,b=fresh[fresh.length-1].c.b;
+    if(same(b,top.a)) continue; // поменяли и вернули как было
+    out.push({g:top.g,d:top.d,p:top.p,sg:top.sg,b,a:top.a});
+  }
+  SLOTMEMO={k:mk,v:out};return out;
+}
+/* подсветка в сетке недели: что добавлено/изменено, и «призраки» отменённых занятий — пока не просмотрено */
 function markChanges(cs,mode,key,w){
-  const u=weekLastUpload(w.key);if(!u) return [];
   const ghosts=[];
-  for(const c of u.ch){
-    if(isSeen({e:u.e,w:u.w,c})) continue; // просмотренное больше не подсвечиваем
+  for(const c of weekSlotChanges(w.key)){
     const r=relChange(c,mode,key);if(!r) continue;
     if(r.kind==='del'){r.b.forEach(it=>ghosts.push({day:c.d,period:c.p,subgroup:c.sg,group:c.g,it}));continue}
     for(const it of r.a){
@@ -1087,7 +1103,7 @@ function markChanges(cs,mode,key,w){
 }
 function ghostCard(g,mode){
   const it=g.it;const T=it.t.map(tShowRaw).join(', '),R=it.r.map(rShow).join(', ');const who=mode==='group'?T:mode==='teacher'?[gShow(g.group),R].filter(Boolean).join(' · '):[gShow(g.group),T].filter(Boolean).join(' · ');
-  return `<div class="ls gone" title="Отменено при последней загрузке этой недели"><span class="ctag del">Отменено</span><div class="ls-s" title="${esc(it.s)}">${esc(dShow(it.s))}</div><div class="ls-m"><span>${esc(who||'—')}</span>${g.subgroup?`<span class="tag">${sgText(g.subgroup)}</span>`:''}</div></div>`;
+  return `<div class="ls gone" title="Отменено — изменение ещё не просмотрено"><span class="ctag del">Отменено</span><div class="ls-s" title="${esc(it.s)}">${esc(dShow(it.s))}</div><div class="ls-m"><span>${esc(who||'—')}</span>${g.subgroup?`<span class="tag">${sgText(g.subgroup)}</span>`:''}</div></div>`;
 }
 
 /* ---------- Вид «Изменения» ---------- */
