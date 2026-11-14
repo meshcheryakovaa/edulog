@@ -396,6 +396,51 @@ function rpSet(g,disc,id,on){
   on?s.add(id):s.delete(id);if(!s.size) m.delete(disc);if(!m.size) RPROPS.delete(g);
 }
 const rowProps=r=>PROPS.filter(p=>r.groups.every(g=>rpHas(g,r.disc,p.id)));
+/* ---------- ИОТ ----------
+   Дисциплины со свойством «ИОТ» идут потоком: в одну пару у нескольких групп сразу несколько дисциплин
+   на выбор. В ячейке расписания такой поток — одна плашка «ИОТ» без дисциплин, преподавателей и аудиторий;
+   что за ИОТ — во всплывающей подсказке. Поток — одна пара и один и тот же набор групп. */
+const IOT_RE=/(^|[^а-яa-z0-9])иот([^а-яa-z0-9]|$)/;
+const iotProp=()=>PROPS.find(p=>IOT_RE.test(lc(p.short||'')))||PROPS.find(p=>IOT_RE.test(lc(p.name)))||null;
+let IOTM={v:-1,r:null,s:new Set(),w:new WeakMap()};
+// группа + дисциплина (ключ каталога), у которых в плане стоит свойство «ИОТ»
+function iotSet(){
+  if(IOTM.v===FVER&&IOTM.r===REG.rooms) return IOTM.s;
+  const p=iotProp(),s=new Set();
+  if(p) for(const [g,m] of RPROPS) for(const [d,ids] of m) if(ids.has(p.id)) s.add(g+'\u0001'+discKey(d));
+  IOTM={v:FVER,r:REG.rooms,s,w:new WeakMap()};return s;
+}
+const isIotRec=(g,subj)=>{const s=iotSet();return s.size>0&&s.has(g+'\u0001'+discKey(subj))};
+const isIot=c=>(c.groups||[c.group]).some(g=>isIotRec(g,c.subject));
+// группы потока: все, у кого в эту пару эта дисциплина идёт как ИОТ (по всей неделе, не только в этой ячейке)
+function iotGroups(c,w){
+  iotSet();let m=IOTM.w.get(w);
+  if(!m){m=new Map();for(const r of w.recs) if(isIotRec(r.group,r.subject)){const k=r.day+'|'+r.period+'|'+discKey(r.subject);(m.get(k)||m.set(k,new Set()).get(k)).add(r.group)}IOTM.w.set(w,m)}
+  const gs=m.get(c.day+'|'+c.period+'|'+discKey(c.subject));
+  return (gs?[...gs]:c.groups.slice()).sort(coll.compare);
+}
+/* занятия ячейки → потоки ИОТ ({gs, cs}) и остальные занятия */
+function iotSplit(its,w){
+  if(!iotSet().size) return {streams:[],rest:its};
+  const by=new Map(),rest=[];
+  for(const c of its){
+    if(!isIot(c)){rest.push(c);continue}
+    const gs=iotGroups(c,w),k=c.day+'|'+c.period+'|'+gs.join(',');
+    (by.get(k)||by.set(k,{gs,cs:[]}).get(k)).cs.push(c);
+  }
+  return {streams:[...by.values()],rest};
+}
+function iotTitle(s){
+  const all=s.gs.join(',');
+  const line=c=>{const own=c.groups.slice().sort(coll.compare).join(',')!==all?' ('+c.groups.map(gShow).join(', ')+')':'';
+    const who=[uniqT(c.teachers).map(t=>tShow(t.key)).join(', '),uniqR(c.rooms).map(rShow).join(', ')].filter(Boolean).join(' · ');
+    const mark=(c.zach?' [Зачёт]':'')+(c.chg==='add'?' [Новое]':c.chg?' [Изменено]':'');
+    return dShow(c.subject)+(c.subgroup?' · '+sgText(c.subgroup):'')+own+(who?' — '+who:'')+mark};
+  return 'ИОТ · поток: '+s.gs.map(gShow).join(', ')+'\n'+s.cs.slice().sort((a,b)=>coll.compare(dShow(a.subject),dShow(b.subject))).map(line).join('\n');
+}
+const iotN=s=>{const n=new Set(s.cs.map(c=>discKey(c.subject))).size,m=s.cs.length;return n>1?n+' '+plural(n,'дисциплина','дисциплины','дисциплин'):m>1?m+' '+plural(m,'занятие','занятия','занятий'):''};
+const iotChg=s=>s.cs.some(c=>c.chg)?(s.cs.every(c=>c.chg==='add')?'add':'chg'):'';
+const iotTags=(s,z)=>{const ch=iotChg(s);return (s.cs.some(c=>c.zach)?z:'')+(ch?`<span class="ctag ${ch}">${ch==='add'?'Новое':'Изменено'}</span>`:'')};
 function propUse(id){let n=0;for(const m of RPROPS.values()) for(const s of m.values()) if(s.has(id)) n++;return n}
 const propTag=p=>`<span class="ptag" style="--pc:${okColor(p.color)}" title="${esc(p.name)}">${esc(p.short||p.name)}</span>`;
 function setDict(o){
@@ -495,7 +540,7 @@ function gaps(recs){let n=0;for(let d=1;d<=6;d++){const ps=[...new Set(recs.filt
 // аудитория с номером: занятия в ней одновременно — накладка (по истинному или короткому названию)
 const numRoom=k=>/^\d/.test(k)||/^\d/.test(rShow(k));
 /* накладки: преподаватель в двух местах, аудитория (с номером) занята разными занятиями, у группы общее занятие совпало с другим */
-function markConflicts(cs,mode,key){
+function markConflicts(cs,mode,key,w){
   const by=new Map();cs.forEach(c=>{const k=slotKey(c);(by.get(k)||by.set(k,[]).get(k)).push(c)});
   let n=0;
   for(const list of by.values()){
@@ -503,12 +548,20 @@ function markConflicts(cs,mode,key){
     let bad=false;
     if(mode==='teacher') bad=key!=='вакант';
     else if(mode==='room') bad=numRoom(key);
-    else bad=list.some(c=>c.subgroup===0);
+    else bad=groupClash(list,w);
     if(bad){n++;list.forEach(c=>c.conf=true)}
   }
   return n;
 }
 
+/* у группы в одну пару: занятие всей группы вместе с другим (в сводной ещё и две одинаковые подгруппы) — накладка.
+   ИОТ одного потока (несколько дисциплин на выбор) считается одним занятием всей группы. */
+function groupClash(its,w,dup){
+  const {streams,rest}=w?iotSplit(its,w):{streams:[],rest:its};
+  if(rest.length+streams.length<2) return false;
+  const sg=rest.map(c=>c.subgroup||0).concat(streams.map(()=>0));
+  return sg.includes(0)||!!dup&&new Set(sg).size<sg.length;
+}
 /* ---------- Сверка плана и расписания на неделю ---------- */
 function reconKey(s,bkey){
   s=String(s||'').trim();const pre=(s.match(/^([12])-/)||[])[1]||'';
@@ -849,12 +902,19 @@ function lessonCard(c,mode,w,compact){
 }
 /* Ячейка пары: занятие всей группы — на всю ширину, 1 подгруппа — левая половина, 2 подгруппа — правая.
    Если занята только одна подгруппа, вторая половина остаётся пустой. */
+function iotCard(s,compact){
+  const ch=iotChg(s);
+  const cls='ls iot'+(s.cs.some(c=>c.conf)?' conf':'')+(s.cs.some(c=>c.zach)?' zach':'')+(ch?' ch-'+ch:'')+(compact?' compact':'');
+  return `<div class="${cls}" tabindex="0" title="${esc(iotTitle(s))}">${iotTags(s,'<span class="ztag">Зачёт</span>')}<div class="ls-s">ИОТ</div><div class="ls-m"><span>${iotN(s)}</span>${s.cs.some(c=>c.conf)?'<span class="tag warn">накладка</span>':''}</div></div>`;
+}
 function slotBody(its,gs,mode,w,compact){
+  // ИОТ — одной плашкой на поток, во всю ширину
+  const sp=iotSplit(its,w),iot=sp.streams.map(s=>iotCard(s,compact)).join('');its=sp.rest;
   const half=sg=>its.filter(c=>c.subgroup===sg).map(c=>lessonCard(c,mode,w,compact)).join('')+gs.filter(g=>g.subgroup===sg).map(g=>ghostCard(g,mode)).join('');
   const full=its.filter(c=>c.subgroup!==1&&c.subgroup!==2).map(c=>lessonCard(c,mode,w,compact)).join('')+gs.filter(g=>g.subgroup!==1&&g.subgroup!==2).map(g=>ghostCard(g,mode)).join('');
   const a=half(1),b=half(2);
   const pair=a||b?`<div class="sg2"><div class="sg-h l">${a||'<div class="sg-free" title="1 подгруппа свободна">1 п/г —</div>'}</div><div class="sg-h r">${b||'<div class="sg-free" title="2 подгруппа свободна">2 п/г —</div>'}</div></div>`:'';
-  return full+pair;
+  return iot+full+pair;
 }
 function weekTable(cs,mode,w,compact,ghosts){
   const head='<th class="wk-p" scope="col"><span>Пара</span></th>'+DAYS.map((d,i)=>`<th scope="col"><span>${d}</span><small>${esc(w.dates[i+1]||'')}</small></th>`).join('');
@@ -897,7 +957,7 @@ function renderSched(key){
   const w=W();const mode=st.mode;
   if(key==='*') return renderGrid(w,mode);
   if(key==null) return main.innerHTML=`<div class="head">${weekNav(w)}</div>`+emptyCard('Список пуст','В расписании нет записей для этого раздела.');
-  const recs=schedRecs(mode,key,w);const cs=cards(recs,mode);markOrig(cs,mode,key);const conf=markConflicts(cs,mode,key);
+  const recs=schedRecs(mode,key,w);const cs=cards(recs,mode);markOrig(cs,mode,key);const conf=markConflicts(cs,mode,key,w);
   const ghosts=markChanges(cs,mode,key,w);const chn=cs.filter(c=>c.chg).length+ghosts.length;
   const s=slots(recs),g=gaps(recs);const pp=VIEW_ONLY?null:planPairs(mode,key,w);
   const days=new Set(recs.map(r=>r.day)).size;
@@ -973,7 +1033,7 @@ function renderGrid(w,mode){
   let conf=0;
   const clash=(its,k)=>{
     if(its.length<2) return false;
-    if(mode==='group'){const sg=its.map(c=>c.subgroup||0);return sg.includes(0)||new Set(sg).size<sg.length}
+    if(mode==='group') return groupClash(its,w,true);
     if(mode==='room') return numRoom(k);
     return true;
   };
@@ -998,6 +1058,14 @@ function renderGrid(w,mode){
     const its=cell.get(k+'|'+d+'|'+p)||[],gs=(ghost.get(k+'|'+d+'|'+p)||[]).map(gone).join('');
     if(!its.length) return gs?`<td class="chg">${gs}</td>`:'<td></td>';
     const bad=clash(its,k);if(bad) conf++;
+    // ИОТ — одна плашка на поток, остальные занятия как обычно
+    const sp=iotSplit(its,w);
+    if(sp.streams.length){
+      const iot=sp.streams.map(s=>`<div class="occ iot" tabindex="0" title="${esc(iotTitle(s))}">${iotTags(s,'<span class="ctag z">Зачёт</span>')}<span class="s">ИОТ</span><small>${iotN(s)}</small></div>`).join('');
+      const r=sp.rest;
+      const more=!r.length?'':mode==='room'&&r.length>3?`<div class="occ" title="${esc(r.map(c=>c.groups.join(', ')+' — '+dShow(c.subject)).join('\n'))}"><span>${r.flatMap(c=>c.groups).map(linkG).join(', ')}</span><small>${r.length} ${plural(r.length,'занятие','занятия','занятий')}</small></div>`:r.map(c=>occ(c,k)).join('');
+      return `<td class="${bad?'conf':'busy'}">${iot}${more}${gs}</td>`;
+    }
     if(mode==='room'&&its.length>3) return `<td class="busy"><div class="occ" title="${esc(its.map(c=>c.groups.join(', ')+' — '+dShow(c.subject)).join('\n'))}"><span>${its.flatMap(c=>c.groups).map(linkG).join(', ')}</span><small>${its.length} ${plural(its.length,'занятие','занятия','занятий')}</small></div>${gs}</td>`;
     // у группы 1 и 2 подгруппа — рядом, как в карточках
     if(mode==='group'&&!bad&&its.every(c=>c.subgroup)){
@@ -1308,7 +1376,7 @@ addEventListener('resize',closePropMenu);
 let PREV=null;
 function openPreview(mode,key){
   const w=W();if(!w) return;
-  key=canon(mode,key);const cs=cards(schedRecs(mode,key,w),mode);markOrig(cs,mode,key);markConflicts(cs,mode,key);
+  key=canon(mode,key);const cs=cards(schedRecs(mode,key,w),mode);markOrig(cs,mode,key);markConflicts(cs,mode,key,w);
   PREV={mode,key};
   $('#modalEyebrow').textContent=`Неделя ${w.week||''} · расписание ${MODE_NAME[mode]}`;
   $('#modalTitle').textContent=label(mode,key);
