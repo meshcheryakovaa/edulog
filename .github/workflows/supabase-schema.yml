@@ -1,0 +1,65 @@
+name: Apply Supabase schema
+
+# Выполняет supabase/schema.sql в базе Supabase:
+#  - автоматически после push в main, если файл схемы изменился;
+#  - вручную: Actions → Apply Supabase schema → Run workflow.
+# Нужен секрет репозитория SUPABASE_DB_URL (строка подключения Session pooler).
+# Скрипт идемпотентный, выполняется одной транзакцией: при ошибке ничего не меняется.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - supabase/schema.sql
+      - .github/workflows/supabase-schema.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-schema
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check secret
+        id: check
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          if [ -z "$SUPABASE_DB_URL" ]; then
+            msg="Секрет SUPABASE_DB_URL не задан (Settings → Secrets and variables → Actions). Схема не применена."
+            if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+              echo "::error::$msg"; exit 1
+            fi
+            echo "::warning::$msg"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install psql
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          if ! command -v psql >/dev/null; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client
+          fi
+          psql --version
+
+      - name: Apply supabase/schema.sql
+        if: steps.check.outputs.skip != 'true'
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          PGSSLMODE: require
+          PGCONNECT_TIMEOUT: '20'
+        run: |
+          psql "$SUPABASE_DB_URL" -X -q -v ON_ERROR_STOP=1 --single-transaction \
+            -c "set client_min_messages to warning" \
+            -f supabase/schema.sql
+          # Чтобы API Supabase сразу увидел новые таблицы и функции.
+          psql "$SUPABASE_DB_URL" -X -q -v ON_ERROR_STOP=1 -c "notify pgrst, 'reload schema'"
+          echo "### Схема применена: \`supabase/schema.sql\` @ ${GITHUB_SHA::7}" >> "$GITHUB_STEP_SUMMARY"
