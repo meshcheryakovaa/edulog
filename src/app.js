@@ -698,7 +698,7 @@ function titleRow(key){
 }
 function emptyCard(h,p,withBtn){return `<div class="panel msg"><h2>${h}</h2><p>${p}</p>${withBtn?'<label class="btn" for="file">Открыть файлы…</label>':''}</div>`}
 
-/* ---------- Вид «Недельный план» ---------- */
+/* ---------- Вид «Учебный план» ---------- */
 function heat(v,max){return max?Math.round(Math.min(v/max,1)*48):0}
 function renderPlan(key){
   const main=$('#main');
@@ -1191,10 +1191,10 @@ function propsPanel(){
       `<td><input type="text" class="pshort" data-pid="${esc(p.id)}" value="${esc(p.short)}" placeholder="как в названии" maxlength="40" aria-label="Короткое название: ${esc(p.name)}"${dis}></td>`+
       `<td>${propTag(p)}</td><td class="c-num">${n}</td>`+
       `<td class="p-act">${ro?'':`<button class="link sm" data-pmove="-1" data-pid="${esc(p.id)}" aria-label="Выше"${i?'':' disabled'}>↑</button> <button class="link sm" data-pmove="1" data-pid="${esc(p.id)}" aria-label="Ниже"${i<PROPS.length-1?'':' disabled'}>↓</button> <button class="link sm danger" data-pdel="${esc(p.id)}" data-n="${n}">удалить</button>`}</td></tr>`}).join('');
-  return `<section class="panel"><h2>Свойства строк недельного плана <span class="pill mute">${PROPS.length}</span></h2>
+  return `<section class="panel"><h2>Свойства строк учебного плана <span class="pill mute">${PROPS.length}</span></h2>
     ${ro?'':`<form class="dict-tools" id="padd"><input type="text" id="pnew" placeholder="Новое свойство, например «Дистанционно»" maxlength="200" aria-label="Название нового свойства"><input type="color" id="pnewc" value="${PCOLORS[PROPS.length%PCOLORS.length]}" aria-label="Цвет нового свойства"><button class="btn sm" type="submit">Добавить</button></form>`}
-    ${PROPS.length?`<div class="rc-wrap"><table class="rc dict-t props-t"><thead><tr><th>Цвет</th><th>Название</th><th>Короткое</th><th>Как выглядит</th><th class="c-num">Строк</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`:'<p class="note">Свойств пока нет. Добавьте первое — и в недельном плане у каждой строки появится кнопка «+ свойство».</p>'}
-    <p class="note">Свойства ставятся на строки (дисциплины) в недельном плане: кнопка «+ свойство» или «✎» рядом с названием. Над таблицей плана по свойству можно отобрать строки. Удаление свойства снимает его со всех строк.${CLOUD&&ro?' Менять список может редактор.':''}</p></section>`;
+    ${PROPS.length?`<div class="rc-wrap"><table class="rc dict-t props-t"><thead><tr><th>Цвет</th><th>Название</th><th>Короткое</th><th>Как выглядит</th><th class="c-num">Строк</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`:'<p class="note">Свойств пока нет. Добавьте первое — и в учебном плане у каждой строки появится кнопка «+ свойство».</p>'}
+    <p class="note">Свойства ставятся на строки (дисциплины) в учебном плане: кнопка «+ свойство» или «✎» рядом с названием. Над таблицей плана по свойству можно отобрать строки. Удаление свойства снимает его со всех строк.${CLOUD&&ro?' Менять список может редактор.':''}</p></section>`;
 }
 function renderDict(){
   const t=st.dtab in DICT_KINDS||st.dtab==='props'?st.dtab:(st.dtab='disc');
@@ -1517,7 +1517,7 @@ function pdfCreditPage(g,items,brk,period,first,last){
   const out=[{text:'Зачёты группы '+g,style:'h',pageBreak:brk&&!first?'before':undefined,margin:!brk&&!first?[0,16,0,0]:undefined},
     {text:course+(pg?pg.students+' студентов · ':'')+items.length+' '+plural(items.length,'зачётная пара','зачётные пары','зачётных пар')+' '+(period||'за семестр'),style:'s'},
     {table:{headerRows:1,dontBreakRows:true,widths:[14,'*',44,92,34,104,62],body},layout:LAY,fontSize:8.5}];
-  let note='Неделя — последняя неделя с парами по недельному плану; день, пара и аудитория — по загруженному расписанию.';
+  let note='Неделя — последняя неделя с парами по учебному плану; день, пара и аудитория — по загруженному расписанию.';
   if(guessed) note+=` Даты недель без расписания рассчитаны от недели ${guessed.week} (${guessed.start.replace(/-/g,'.')}) по 7 дней.`;
   if(brk||last) out.push({text:note,style:'note'});
   return out;
@@ -1557,7 +1557,7 @@ async function makePdf(kind){
     if(kind==='one'&&(key==null||key==='*')) return toast('Выберите группу, преподавателя или аудиторию.',true);
     return openSchedDlg(kind);
   }
-  if(!PLAN) return toast('Для зачётов нужен недельный план (.txt).',true);
+  if(!PLAN) return toast('Для зачётов нужен учебный план (.txt).',true);
   openCreditDlg();
 }
 
@@ -1656,7 +1656,7 @@ function creditDlgSum(){
 }
 function openCreditDlg(){
   ZD.all=creditAll();
-  if(!ZD.all.length) return toast('Нет отмеченных зачётных дисциплин: поставьте флажки в недельном плане.',true);
+  if(!ZD.all.length) return toast('Нет отмеченных зачётных дисциплин: поставьте флажки в учебном плане.',true);
   const gs=ZD.all.map(x=>x[0]),cur=st.mode==='group'&&gs.includes(st.key.group)?st.key.group:gs[0];
   $('#zdGroup').innerHTML=gs.map(g=>`<option${g===cur?' selected':''}>${esc(g)}</option>`).join('');
   const cnt=new Map();ZD.all.forEach(([,its])=>its.forEach(it=>cnt.set(it.week,(cnt.get(it.week)||0)+1)));
