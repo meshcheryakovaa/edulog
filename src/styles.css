@@ -472,3 +472,9 @@ body.v-dict .adm-tabs button{white-space:nowrap}
 .co-hid{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:10px}
 .chip{border:1px dashed var(--rule);background:var(--surface);border-radius:999px;padding:2px 10px;font:inherit;font-size:12.5px;cursor:pointer;color:var(--ink)}
 .chip:hover{border-color:var(--accent);color:var(--accent)}
+.rg .occ .g .link{color:var(--accent);font-weight:700;font-family:var(--f-mono);font-size:12px}
+.arrow.xs.eye{color:var(--accent)}
+.arrow.xs.eye.is-off{color:var(--muted);background:var(--sunk)}
+.rg thead th.off{opacity:.55}
+.rg thead th.off b{text-decoration:line-through}
+.rg td.off{background:repeating-linear-gradient(135deg,transparent 0 6px,color-mix(in srgb,var(--muted) 10%,transparent) 6px 7px)}

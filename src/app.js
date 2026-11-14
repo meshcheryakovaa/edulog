@@ -904,10 +904,10 @@ function userName(){const n=window.EduLOGCloud&&window.EduLOGCloud.userName&&win
 function colBar(mode,all,hidden){
   const who=userName();
   const note=`<p class="co-note">${who?`Порядок и скрытые столбцы сохраняются только для пользователя <b>${esc(who)}</b>.`:'Порядок и скрытые столбцы сохраняются только в этом браузере.'} У остальных пользователей прежний порядок, все столбцы видны.</p>`;
-  const hid=hidden.length?`<div class="co-hid"><span class="eyebrow">Скрыто: ${hidden.length}</span>${hidden.map(k=>`<button class="chip" data-colshow="${esc(k)}" title="Показать столбец">${esc(colLabel(mode,k))} <span aria-hidden="true">＋</span></button>`).join('')}${hidden.length>1?'<button class="link sm" data-colshowall>показать все</button>':''}</div>`:'';
+  const hid=hidden.length?`<div class="co-hid"><span class="eyebrow">Скрыто: ${hidden.length}</span><span class="note">${hidden.map(k=>esc(colLabel(mode,k))).join(', ')}</span><button class="link sm" data-colshowall>показать все</button></div>`:'';
   if(!st.colEdit) return (colsOwn(mode)?`<div class="co-info">Свой порядок столбцов${hidden.length?`, скрыто: ${hidden.length}`:''} (видно только вам).</div>`:'');
   return `<section class="panel colord" aria-label="Настройка столбцов"><h2>Настройка столбцов<span class="sp"></span>${colsOwn(mode)?'<button class="link sm" data-colreset>вернуть обычный порядок</button>':''}<button class="btn sm" data-coledit>Готово</button></h2>
-    <p class="note">Стрелки над названием двигают столбец влево и вправо, × скрывает его. Заголовок столбца можно перетащить мышкой на новое место.</p>${note}${hid}</section>`;
+    <p class="note">Стрелки над названием двигают столбец влево и вправо, глазик показывает или скрывает его (скрытые здесь бледные, после «Готово» исчезнут). Заголовок столбца можно перетащить мышкой на новое место.</p>${note}${hid}</section>`;
 }
 /* сводная таблица недели: столбцы — все группы / преподаватели / аудитории, строки — пары по дням */
 function renderGrid(w,mode){
@@ -920,7 +920,7 @@ function renderGrid(w,mode){
   else if(mode==='teacher') cols.sort((a,b)=>coll.compare(tShow(a),tShow(b)));
   else cols.sort(cmpRooms);
   cols=applyColOrd(mode,cols);GRIDALL=cols;
-  const hidden=cols.filter(k=>colCfg(mode).h.includes(k));cols=cols.filter(k=>!hidden.includes(k));
+  const hidden=cols.filter(k=>colCfg(mode).h.includes(k));const isOff=k=>hidden.includes(k);if(!st.colEdit) cols=cols.filter(k=>!isOff(k));
   const days=[...new Set(w.recs.map(r=>r.day))].sort((a,b)=>a-b);
   let conf=0;
   const clash=(its,k)=>{
@@ -935,10 +935,13 @@ function renderGrid(w,mode){
     const S=`<span class="s" title="${esc(c.subject)}">${esc(dShow(c.subject))}</span>`;
     const sg=c.subgroup?`<span class="tag">${sgText(c.subgroup)}</span>`:'';
     if(mode==='group') return `<div class="occ">${tz(c)}${S}<small>${T||'—'}${R?' · '+R:''} ${sg}</small></div>`;
-    if(mode==='teacher') return `<div class="occ"><span>${G} ${sg}</span>${tz(c)}${S}<small>${R||'—'}</small></div>`;
-    return `<div class="occ"><span>${G} ${sg}</span><small>${T||'—'}</small></div>`;
+    if(mode==='teacher') return `<div class="occ"><span class="g">${G} ${sg}</span>${tz(c)}${S}<small>${R||'—'}</small></div>`;
+    return `<div class="occ"><span class="g">${G} ${sg}</span><small>${T||'—'}</small></div>`;
   };
+  const EYE='<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+  const EYE_OFF='<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.6 5.1A10.4 10.4 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6A17.4 17.4 0 0 0 2 12s3.6 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="M2 2l20 20"/></svg>';
   const td=(k,d,p)=>{
+    if(isOff(k)) return '<td class="off"></td>';
     const its=cell.get(k+'|'+d+'|'+p)||[];if(!its.length) return '<td></td>';
     const bad=clash(its,k);if(bad) conf++;
     if(mode==='room'&&its.length>3) return `<td class="busy"><div class="occ" title="${esc(its.map(c=>c.groups.join(', ')+' — '+dShow(c.subject)).join('\n'))}"><span>${its.flatMap(c=>c.groups).map(linkG).join(', ')}</span><small>${its.length} ${plural(its.length,'занятие','занятия','занятий')}</small></div></td>`;
@@ -950,11 +953,11 @@ function renderGrid(w,mode){
     return `<td class="${bad?'conf':'busy'}">${its.map(occ).join('')}</td>`;
   };
   const ctl=k=>{if(!st.colEdit) return '';const i=cols.indexOf(k);
-    return `<div class="co-ctl"><button class="arrow xs" data-colmv="-1" data-k="${esc(k)}" aria-label="Левее"${i?'':' disabled'}>←</button><button class="arrow xs" data-colhide="${esc(k)}" aria-label="Скрыть столбец" title="Скрыть столбец">×</button><button class="arrow xs" data-colmv="1" data-k="${esc(k)}" aria-label="Правее"${i<cols.length-1?'':' disabled'}>→</button></div>`};
+    return `<div class="co-ctl"><button class="arrow xs" data-colmv="-1" data-k="${esc(k)}" aria-label="Левее"${i?'':' disabled'}>←</button><button class="arrow xs eye${isOff(k)?' is-off':''}" data-colhide="${esc(k)}" aria-pressed="${!isOff(k)}" aria-label="${isOff(k)?'Показать столбец':'Скрыть столбец'}" title="${isOff(k)?'Не видно — показать':'Видно — скрыть'}">${isOff(k)?EYE_OFF:EYE}</button><button class="arrow xs" data-colmv="1" data-k="${esc(k)}" aria-label="Правее"${i<cols.length-1?'':' disabled'}>→</button></div>`};
   const headCell=k=>{
-    if(mode==='room'){const p=NAMES.room.has(k)?{code:rShow(k),owner:''}:roomParts(k);return `<th scope="col" draggable="true" data-col="${esc(k)}">${ctl(k)}<button class="link" data-go="room" data-key="${esc(k)}" title="${esc(k)}"><b>${esc(p.code)}</b></button>${p.owner?`<small>${esc(p.owner)}</small>`:''}</th>`}
-    if(mode==='teacher') return `<th scope="col" draggable="true" data-col="${esc(k)}">${ctl(k)}<button class="link" data-go="teacher" data-key="${esc(k)}" title="${esc(tName(k))}"><b>${esc(tShow(k))}</b></button></th>`;
-    return `<th scope="col" draggable="true" data-col="${esc(k)}">${ctl(k)}<button class="link" data-go="group" data-key="${esc(k)}" title="${esc(k)}"><b>${esc(gShow(k))}</b></button></th>`;
+    if(mode==='room'){const p=NAMES.room.has(k)?{code:rShow(k),owner:''}:roomParts(k);return `<th scope="col" draggable="true" data-col="${esc(k)}"${isOff(k)?' class="off"':''}>${ctl(k)}<button class="link" data-go="room" data-key="${esc(k)}" title="${esc(k)}"><b>${esc(p.code)}</b></button>${p.owner?`<small>${esc(p.owner)}</small>`:''}</th>`}
+    if(mode==='teacher') return `<th scope="col" draggable="true" data-col="${esc(k)}"${isOff(k)?' class="off"':''}>${ctl(k)}<button class="link" data-go="teacher" data-key="${esc(k)}" title="${esc(tName(k))}"><b>${esc(tShow(k))}</b></button></th>`;
+    return `<th scope="col" draggable="true" data-col="${esc(k)}"${isOff(k)?' class="off"':''}>${ctl(k)}<button class="link" data-go="group" data-key="${esc(k)}" title="${esc(k)}"><b>${esc(gShow(k))}</b></button></th>`;
   };
   // у групп над шапкой — строка курсов
   let pre='';
@@ -969,7 +972,7 @@ function renderGrid(w,mode){
   }
   const what={group:['Групп','Все группы'],teacher:['Преподавателей','Все преподаватели'],room:['Аудиторий','Все аудитории']}[mode];
   $('#main').innerHTML=`<section class="head"><div class="head-l"><span class="eyebrow">Сводная таблица</span><h1>${what[1]}</h1>${st.colEdit?'':`<div class="co-bar"><button class="btn ghost sm" data-coledit>⇄ Настроить столбцы</button></div>`}</div>${weekNav(w)}</section>${colBar(mode,GRIDALL,hidden)}
-    <dl class="stats"><div class="stat"><dt>${what[0]}</dt><dd>${cols.length}${hidden.length?` <small>из ${GRIDALL.length}</small>`:''}</dd></div><div class="stat"><dt>Занятий</dt><dd>${cs.length}</dd></div>${conf?`<div class="stat bad"><dt>Накладки</dt><dd>${conf}</dd></div>`:''}</dl>
+    <dl class="stats"><div class="stat"><dt>${what[0]}</dt><dd>${GRIDALL.length-hidden.length}${hidden.length?` <small>из ${GRIDALL.length}</small>`:''}</dd></div><div class="stat"><dt>Занятий</dt><dd>${cs.length}</dd></div>${conf?`<div class="stat bad"><dt>Накладки</dt><dd>${conf}</dd></div>`:''}</dl>
     <div class="legend"><span>Столбцы — ${what[1].toLowerCase()}, строки — пары по дням недели</span><span>Клик по заголовку столбца — его расписание, перетаскивание — порядок столбцов</span><span>Красным — накладки</span></div>
     <div class="rg-wrap"><table class="rg rg-${mode}${st.colEdit?' co-edit':''}"><thead>${pre}<tr><th class="rg-d" scope="col">День</th><th class="rg-p" scope="col">Пара</th>${cols.map(headCell).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
@@ -1337,12 +1340,12 @@ document.addEventListener('click',e=>{
   const g=e.target.closest('[data-go]');if(g){go(g.dataset.go,g.dataset.key);return}
   if(e.target.closest('[data-coledit]')){st.colEdit=!st.colEdit;render();return}
   if(e.target.closest('[data-colreset]')){delete COLS[st.mode];saveCols();render();return}
-  const ch=e.target.closest('[data-colhide]');if(ch){hideCol(st.mode,ch.dataset.colhide,true);return}
+  const ch=e.target.closest('[data-colhide]');if(ch){hideCol(st.mode,ch.dataset.colhide,!colCfg(st.mode).h.includes(ch.dataset.colhide));return}
   const cv=e.target.closest('[data-colshow]');if(cv){hideCol(st.mode,cv.dataset.colshow,false);return}
   if(e.target.closest('[data-colshowall]')){colCfg(st.mode).h=[];saveCols();render();return}
   const cm=e.target.closest('[data-colmv]');if(cm){
     // соседний видимый столбец — через скрытые перешагиваем
-    const h=colCfg(st.mode).h,vis=GRIDALL.filter(k=>!h.includes(k)),k=cm.dataset.k,i=vis.indexOf(k),d=+cm.dataset.colmv,nb=vis[i+d];if(i<0||!nb) return;
+    const h=st.colEdit?[]:colCfg(st.mode).h,vis=GRIDALL.filter(k=>!h.includes(k)),k=cm.dataset.k,i=vis.indexOf(k),d=+cm.dataset.colmv,nb=vis[i+d];if(i<0||!nb) return;
     const all=GRIDALL;moveCol(st.mode,all,k,d<0?nb:(all[all.indexOf(nb)+1]??null));return}
   const s=e.target.closest('[data-step]');
   if(s){const ps=LIST.filter(i=>i.present&&!i.all);if(ps.length<2) return;const i=ps.findIndex(x=>x.key===st.key[st.mode]);
