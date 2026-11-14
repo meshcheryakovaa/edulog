@@ -13,10 +13,11 @@ const BASE=(u=>/^[a-z0-9]{10,40}$/i.test(u)?`https://${u}.supabase.co`:/^[a-z]+:
 const KEY=A.CFG.supabaseAnonKey;
 const SKEY='edulog-auth';
 
-const ROLES={pending:'Ожидает',viewer:'Просмотр',editor:'Редактор',admin:'Администратор',blocked:'Заблокирован'};
+const ROLES={pending:'Ожидает',viewer:'Просмотр',manager:'Руководитель',editor:'Редактор',admin:'Администратор',blocked:'Заблокирован'};
 const ROLE_HINT={
   pending:'зарегистрировался, данных не видит',
   viewer:'видит только расписание и печатает его, отмечает просмотренные изменения',
+  manager:'только чтение: учебный план, итоговое расписание без отметок изменений и отчёты',
   editor:'видит всё, публикует файлы и отмечает зачёты',
   admin:'всё, плюс пользователи и журнал',
   blocked:'доступ закрыт',
@@ -117,7 +118,7 @@ async function fetchSeen(ups){
     SEEN_DB=true;return r||[];
   }catch(e){if(missingTable(e)){SEEN_DB=false;return []}throw e}
 }
-const pushSeen=rows=>A.setSeen(rows,canRead()&&SEEN_DB);
+const pushSeen=rows=>A.setSeen(rows,canRead()&&role()!=='manager'&&SEEN_DB);
 async function saveSeen(keys,on){
   if(!SEEN_DB) throw new Error(SEEN_HINT);
   const by=new Map();
@@ -347,7 +348,7 @@ async function revert(){
 
 /* ---------- Права ---------- */
 const role=()=>ME?ME.role:'anon';
-const canRead=()=>['viewer','editor','admin'].includes(role());
+const canRead=()=>['viewer','manager','editor','admin'].includes(role());
 const canEdit=()=>['editor','admin'].includes(role());
 const isAdmin=()=>role()==='admin';
 
@@ -461,7 +462,7 @@ function renderMe(){
 
 /* ---------- Вход / выход ---------- */
 function signedOut(note){
-  keep(null);ME=null;META={};A.clear();A.setFlags([]);A.setDict({});A.setCanFlag(false);A.setViewOnly(false);A.setSeen([],false);renderMe();
+  keep(null);ME=null;META={};A.clear();A.setFlags([]);A.setDict({});A.setCanFlag(false);A.setViewOnly(false);A.setLeader(false);A.setSeen([],false);renderMe();
   if(A.view==='admin') A.setView('plan');else A.refresh();
   showGate('in',note);
 }
@@ -489,7 +490,7 @@ async function boot(){
   }
   renderMe();
   if(ME.role==='pending'||ME.role==='blocked'){showGate(ME.role);return}
-  A.setCanFlag(canEdit());A.setViewOnly(role()==='viewer');
+  A.setCanFlag(canEdit());A.setViewOnly(role()==='viewer');A.setLeader(role()==='manager');
   try{await loadData()}catch(e){A.toast(e.message,true)}
   zachetSync().catch(()=>{});
   lastCheck=Date.now();
@@ -560,6 +561,7 @@ function renderAdmin(main){
       <div class="req"><div><b>${esc(u.full_name||'Без имени')}</b><div class="sub">${esc(u.email)} · ${esc(fmt(u.created_at))}</div></div>
       <span class="sp"></span>
       <button class="btn sm" data-set="viewer" data-uid="${esc(u.id)}">Одобрить: просмотр</button>
+      <button class="btn ghost sm" data-set="manager" data-uid="${esc(u.id)}">Руководитель</button>
       <button class="btn ghost sm" data-set="editor" data-uid="${esc(u.id)}">Редактор</button>
       <button class="btn ghost sm danger" data-set="blocked" data-uid="${esc(u.id)}">Отклонить</button></div>`).join('')+'</div></section>':'';
     body=pendHtml+`<section class="panel"><h2>Все пользователи · ${ADM.users.length}

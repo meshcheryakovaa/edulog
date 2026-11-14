@@ -387,6 +387,8 @@ th.w.chg::after{content:'';position:absolute;left:50%;bottom:2px;width:5px;heigh
 /* ---------- Словари и свойства строк ---------- */
 body.v-dict .layout{grid-template-columns:minmax(0,1fr)}
 body.v-dict .side{display:none}
+body.v-reports .layout{grid-template-columns:minmax(0,1fr)}
+body.v-reports .side{display:none}
 .dict-tools{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
 .dict-tools .sp{flex:1}
 .dict-tools input[type=search],.dict-tools input[type=text]{font:inherit;padding:6px 10px;border:1px solid var(--rule);border-radius:6px;background:var(--sunk);color:var(--ink);min-width:0;flex:1 1 260px;max-width:440px}

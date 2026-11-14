@@ -6,6 +6,8 @@ const CLOUD=!!(CFG.supabaseUrl&&CFG.supabaseAnonKey);
 let CAN_FLAG=!CLOUD;
 // Роль «Просмотр»: доступны только расписание и его печать (план, журнал и словари скрыты)
 let VIEW_ONLY=false;
+// Роль «Руководитель»: только чтение — учебный план, итоговое расписание (без отметок изменений) и отчёты
+let LEADER=false;
 const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const plural=(n,a,b,c)=>{const m=n%10,h=n%100;return m===1&&h!==11?a:(m>=2&&m<=4&&(h<10||h>=20)?b:c)};
@@ -263,7 +265,7 @@ function zRow(e,m,ei){
 }
 /* все непросмотренные изменения недели: по всем загрузкам, как в «Изменениях этой недели», и переносы зачётов */
 function weekUnseen(wk){
-  const out=[];if(!SCHED||!wk) return out;
+  const out=[];if(!SCHED||!wk||LEADER) return out;
   for(const e of SCHED.history){
     for(const w of e.weeks){if(w.st!=='upd'||w.k!==wk) continue;
       for(const c of e.ch[w.k]||[]){const r={e,w,c};if(!isSeen(r)) out.push(r)}}
@@ -280,7 +282,7 @@ function touched(list){
 function touchedFor(view){
   const k=view+'|'+st.wi;if(CHMEMO.has(k)) return CHMEMO.get(k);
   let list=[];
-  if(SCHED&&SCHED.history.length){
+  if(SCHED&&SCHED.history.length&&!LEADER){
     if(view==='sched'){
       // «изм.» — только пока на этой неделе есть непросмотренное
       const w=W();const T={group:new Set(),teacher:new Set(),room:new Set()};
@@ -681,11 +683,12 @@ function renderList(){
 function renderTabs(){
   // роль «Просмотр» видит только расписание групп
   document.querySelectorAll('.tab').forEach(b=>{b.setAttribute('aria-selected',String(b.dataset.mode===st.mode));b.hidden=VIEW_ONLY&&b.dataset.mode!=='group'});
-  document.querySelectorAll('.seg [data-view]').forEach(b=>{b.setAttribute('aria-selected',String(b.dataset.view===st.view));if(b.dataset.view!=='admin') b.hidden=VIEW_ONLY&&b.dataset.view!=='sched'});
+  // «Руководитель» видит план, расписание и отчёты; журнал изменений и словари — нет
+  document.querySelectorAll('.seg [data-view]').forEach(b=>{b.setAttribute('aria-selected',String(b.dataset.view===st.view));if(b.dataset.view!=='admin') b.hidden=!viewAllowed(b.dataset.view)});
   // счётчик непросмотренных изменений текущей недели (по всем группам) на вкладке «Расписание»
   const sb=$('#view-sched'),w=W(),nu=CAN_SEEN&&w?weekUnseen(w.key).length:0;
   sb.innerHTML='Расписание'+(nu?` <span class="tcnt" title="Непросмотренных изменений на неделе ${esc(w.week||fmtRange(w))}: ${nu}">${nu}</span>`:'');
-  document.querySelector('label[for=file]').hidden=VIEW_ONLY;$('#pdf-zach').hidden=VIEW_ONLY;$('#srcPlan').hidden=VIEW_ONLY;
+  document.querySelector('label[for=file]').hidden=VIEW_ONLY||LEADER;$('#pdf-zach').hidden=VIEW_ONLY;$('#srcPlan').hidden=VIEW_ONLY;
 }
 const ALL_NAME={group:'Все группы',teacher:'Все преподаватели',room:'Все аудитории'};
 const MODE_NAME={group:'группы',teacher:'преподавателя',room:'аудитории'};
@@ -768,7 +771,7 @@ function renderPlan(key){
     ${fileTot?`<p class="note">Нагрузка группы взята из строки «ИТОГО» файла: параллельные подгруппы и потоки учтены один раз, поэтому сумма часов в таблице может быть больше.</p>`:''}
     ${streams&&!fileTot?`<p class="note">Потоковые занятия, общие для нескольких групп, посчитаны один раз (${streams} ${plural(streams,'строка','строки','строк')}).</p>`:''}
   </section>
-  ${PROPS.length?`<div class="pfilter" role="group" aria-label="Отбор строк по свойству"><span class="k">Свойства:</span>${PROPS.map(p=>`<button class="pf${st.pf===p.id?' on':''}" data-pf="${esc(p.id)}" aria-pressed="${st.pf===p.id}">${propTag(p)}<small>${pfCount.get(p.id)}</small></button>`).join('')}${pf?`<button class="link sm" data-pf="">показать все строки</button>`:''}<button class="link sm" data-view-go="dict" data-dtab-go="props">изменить список</button></div>`:''}
+  ${PROPS.length?`<div class="pfilter" role="group" aria-label="Отбор строк по свойству"><span class="k">Свойства:</span>${PROPS.map(p=>`<button class="pf${st.pf===p.id?' on':''}" data-pf="${esc(p.id)}" aria-pressed="${st.pf===p.id}">${propTag(p)}<small>${pfCount.get(p.id)}</small></button>`).join('')}${pf?`<button class="link sm" data-pf="">показать все строки</button>`:''}${canDict()?'<button class="link sm" data-view-go="dict" data-dtab-go="props">изменить список</button>':''}</div>`:''}
   <div class="legend"><span>Флажок слева — зачётная дисциплина: её последняя пара обведена здесь и помечена «зачёт» в расписании; флажок в шапке отмечает или снимает все сразу</span><span>Ячейка недели — число пар (1 пара = 2 ч)</span><span>«расст.» — по неделям расставлено меньше часов, чем по плану</span><span>Свойства строк и короткие названия задаются в разделе «Словари»</span>${chW.size?'<span>Номер недели с точкой — в расписании этой недели были изменения (список внизу)</span>':''}</div>
   <div class="grid-wrap"><table>
     <thead><tr><th class="c-disc" scope="col"><div class="dd">${zAll}<span>${mode==='group'?'Дисциплина':'Группа и дисциплина'}</span></div></th>${showWho?'<th scope="col">Преподаватель</th>':''}${showRoom?'<th scope="col">Ауд.</th>':''}<th class="c-num" scope="col">Часы</th>${weekHead}<th class="c-num" scope="col">Расст.</th></tr></thead>
@@ -978,7 +981,7 @@ function renderGrid(w,mode){
   const what={group:['Групп','Все группы'],teacher:['Преподавателей','Все преподаватели'],room:['Аудиторий','Все аудитории']}[mode];
   $('#main').innerHTML=`<section class="head"><div class="head-l"><span class="eyebrow">Сводная таблица</span><h1>${what[1]}</h1>${st.colEdit?'':`<div class="co-bar"><button class="btn ghost sm" data-coledit>⇄ Настроить столбцы</button></div>`}</div>${weekNav(w)}</section>${colBar(mode,GRIDALL,hidden)}
     <dl class="stats"><div class="stat"><dt>${what[0]}</dt><dd>${GRIDALL.length-hidden.length}${hidden.length?` <small>из ${GRIDALL.length}</small>`:''}</dd></div><div class="stat"><dt>Занятий</dt><dd>${cs.length}</dd></div>${conf?`<div class="stat bad"><dt>Накладки</dt><dd>${conf}</dd></div>`:''}</dl>
-    <div class="legend"><span>Столбцы — ${what[1].toLowerCase()}, строки — пары по дням недели</span><span>Клик по заголовку столбца — его расписание, перетаскивание — порядок столбцов</span><span>Красным — накладки</span><span>«Новое», «Изменено», «Отменено» — непросмотренные изменения недели по всем загрузкам, после отметки «просмотрено» метка исчезает</span></div>
+    <div class="legend"><span>Столбцы — ${what[1].toLowerCase()}, строки — пары по дням недели</span><span>Клик по заголовку столбца — его расписание, перетаскивание — порядок столбцов</span><span>Красным — накладки</span>${LEADER?'':'<span>«Новое», «Изменено», «Отменено» — непросмотренные изменения недели по всем загрузкам, после отметки «просмотрено» метка исчезает</span>'}</div>
     <div class="rg-wrap"><table class="rg rg-${mode}${st.colEdit?' co-edit':''}"><thead>${pre}<tr><th class="rg-d" scope="col">День</th><th class="rg-p" scope="col">Пара</th>${cols.map(headCell).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
@@ -1045,7 +1048,7 @@ function changesTable(rows,mode,opt){
 }
 function entityChangesPanel(mode,key,opt){
   opt=opt||{};
-  if(!SCHED||!SCHED.history.length||key==null||key==='*') return '';
+  if(!SCHED||!SCHED.history.length||key==null||key==='*'||LEADER) return '';
   const all=entityChanges(mode,key,opt.week);
   const lim=opt.limit||12;
   const title=opt.week?`Изменения этой недели`:'Изменения в расписании';
@@ -1069,7 +1072,7 @@ function entityChangesPanel(mode,key,opt){
    Загрузка недели заново («новая неделя») или её удаление обрывает историю. */
 let SLOTMEMO={k:'',v:[]};
 function weekSlotChanges(wk){
-  if(!SCHED||!wk) return [];
+  if(!SCHED||!wk||LEADER) return [];
   const mk=wk+'|'+FVER+'|'+SCHED.history.length+'|'+SEEN.size+'|'+CAN_SEEN;if(SLOTMEMO.k===mk) return SLOTMEMO.v;
   const by=new Map();
   for(const e of SCHED.history){
@@ -1122,6 +1125,11 @@ const ST_TXT={new:'новая неделя',upd:'обновлена',same:'бе�
 function weekChip(w){
   const extra=w.st==='upd'?` · ${[w.add?'+'+w.add:'',w.chg?'~'+w.chg:'',w.del?'−'+w.del:''].filter(Boolean).join(' ')}`:w.st!=='del'?` · ${w.n} ${plural(w.n,'занятие','занятия','занятий')}`:'';
   return `<span class="wchip s-${w.st}"><b>${w.week?'Неделя '+w.week:'Неделя'}</b> ${esc(fmtRange(w))} · ${ST_TXT[w.st]}${extra}</span>`;
+}
+/* ---------- Отчёты (Редактор и Руководитель) ---------- */
+function renderReports(){
+  $('#main').innerHTML=`<section class="head"><div class="head-l"><span class="eyebrow">Отчёты</span><div class="title-row"><h1>Отчёты</h1></div></div></section>
+    <div class="panel msg"><h2>Раздел готовится</h2><p>Здесь появятся отчёты по учебному плану и расписанию. Раздел доступен редактору и руководителю.</p></div>`;
 }
 function renderChanges(key){
   const main=$('#main');
@@ -1262,12 +1270,18 @@ function openPreview(mode,key){
 function closePreview(){$('#modal').hidden=true;document.body.classList.remove('modal-open');PREV=null}
 
 /* ---------- Отрисовка ---------- */
+function viewAllowed(v){
+  if(VIEW_ONLY) return v==='sched';
+  if(LEADER) return v==='plan'||v==='sched'||v==='reports';
+  return true;
+}
 function render(){
-  if(VIEW_ONLY&&st.view!=='sched'&&st.view!=='admin') st.view='sched';
+  if(st.view!=='admin'&&!viewAllowed(st.view)) st.view='sched';
   if(VIEW_ONLY&&st.mode!=='group') st.mode='group';
   renderTabs();
   document.body.classList.toggle('v-admin',st.view==='admin');
   document.body.classList.toggle('v-dict',st.view==='dict');
+  document.body.classList.toggle('v-reports',st.view==='reports');
   if(st.view!=='plan') closePropMenu();
   if(st.view==='dict'){
     // фоновое обновление не сбивает ввод: пока курсор в поле словаря, страница не перерисовывается
@@ -1275,6 +1289,7 @@ function render(){
     if(!(a&&a.matches('input[type=text],input[type=search]')&&$('#main').contains(a))) renderDict();
     renderSources();save();return;
   }
+  if(st.view==='reports'){renderReports();renderSources();save();return}
   if(st.view==='admin'){
     if(window.EduLOGCloud&&window.EduLOGCloud.isAdmin()){window.EduLOGCloud.renderAdmin($('#main'));save();return}
     st.view='plan';renderTabs();document.body.classList.remove('v-admin');
@@ -1327,7 +1342,7 @@ function ingest(text,name,sample,extra){
   PLAN=Object.assign({name,file:name,groups,sample,raw:text},extra);FVER++;return 'plan';
 }
 async function openFiles(files){
-  if(VIEW_ONLY){toast('Роль «Просмотр»: открывать файлы может редактор.',true);return}
+  if(VIEW_ONLY||LEADER){toast(`Роль «${LEADER?'Руководитель':'Просмотр'}»: открывать файлы может редактор.`,true);return}
   const done=[],report=[];let last=null;
   // файлы применяются по очереди: если одна неделя есть в двух файлах, останется из последнего
   for(const f of files){try{last=ingest(decode(await f.arrayBuffer()),f.name,false,{local:true,report});done.push(f.name)}catch(e){toast(e.message||'Не удалось открыть файл.',true)}}
@@ -1338,7 +1353,7 @@ async function openFiles(files){
 }
 $('#file').addEventListener('change',e=>{openFiles([...e.target.files]);e.target.value=''});
 let dragN=0;
-addEventListener('dragenter',e=>{if(!VIEW_ONLY&&[...(e.dataTransfer&&e.dataTransfer.types||[])].includes('Files')){dragN++;$('#drop').hidden=false}});
+addEventListener('dragenter',e=>{if(!VIEW_ONLY&&!LEADER&&[...(e.dataTransfer&&e.dataTransfer.types||[])].includes('Files')){dragN++;$('#drop').hidden=false}});
 addEventListener('dragleave',()=>{if(--dragN<=0){dragN=0;$('#drop').hidden=true}});
 addEventListener('dragover',e=>e.preventDefault());
 addEventListener('drop',e=>{e.preventDefault();dragN=0;$('#drop').hidden=true;openFiles([...e.dataTransfer.files])});
@@ -1744,6 +1759,7 @@ window.EduLOG={
   setFlags(rows){FLAGS=new Map();for(const r of rows){let s=FLAGS.get(r.grp);if(!s){s=new Set();FLAGS.set(r.grp,s)}s.add(r.code)}FVER++},
   setCanFlag(v){CAN_FLAG=!!v},
   setViewOnly(v){VIEW_ONLY=!!v},
+  setLeader(v){LEADER=!!v;CHMEMO.clear();SLOTMEMO.k=null},
   // отметки «просмотрено» текущего пользователя: [{upload_id, ckey}]; can — можно ли отмечать
   setSeen(rows,can){SEEN=new Set((rows||[]).map(r=>r.upload_id+'|'+r.ckey));CAN_SEEN=!!can;CHMEMO.clear()},
   zachetPos,zachetMoves,

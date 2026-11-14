@@ -5,6 +5,8 @@
 -- Роли пользователей (profiles.role):
 --   pending  — зарегистрировался, ждёт одобрения администратора (данных не видит);
 --   viewer   — просмотр опубликованных плана, расписания, отметок зачётов и словарей;
+--   manager  — «Руководитель»: то же чтение без отметок «просмотрено», в интерфейсе —
+--              учебный план, итоговое расписание и отчёты;
 --   editor   — плюс публикация файлов плана/расписания, отметки зачётов и правка словарей;
 --   admin    — плюс управление пользователями и журнал действий;
 --   blocked  — доступ закрыт.
@@ -16,10 +18,14 @@ create table if not exists public.profiles (
   email       text not null,
   full_name   text not null default '',
   role        text not null default 'pending'
-              check (role in ('pending','viewer','editor','admin','blocked')),
+              check (role in ('pending','viewer','manager','editor','admin','blocked')),
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now()
 );
+-- В уже созданной таблице расширить список ролей (добавлена роль manager).
+alter table public.profiles drop constraint if exists profiles_role_check;
+alter table public.profiles add constraint profiles_role_check
+  check (role in ('pending','viewer','manager','editor','admin','blocked'));
 
 -- Роль текущего пользователя. security definer — чтобы политики RLS
 -- могли читать profiles, не упираясь в собственные же политики.
@@ -29,7 +35,7 @@ returns text language sql stable security definer set search_path = public as $$
 $$;
 
 create or replace function public.can_read()  returns boolean language sql stable as
-$$ select public.my_role() in ('viewer','editor','admin') $$;
+$$ select public.my_role() in ('viewer','manager','editor','admin') $$;
 create or replace function public.can_edit()  returns boolean language sql stable as
 $$ select public.my_role() in ('editor','admin') $$;
 create or replace function public.is_admin()  returns boolean language sql stable as
@@ -246,7 +252,7 @@ create policy sched_seen_select on public.sched_seen for select to authenticated
   using (user_id = auth.uid() and public.can_read());
 drop policy if exists sched_seen_insert on public.sched_seen;
 create policy sched_seen_insert on public.sched_seen for insert to authenticated
-  with check (user_id = auth.uid() and public.can_read());
+  with check (user_id = auth.uid() and public.can_read() and public.my_role() <> 'manager');
 drop policy if exists sched_seen_delete on public.sched_seen;
 create policy sched_seen_delete on public.sched_seen for delete to authenticated
   using (user_id = auth.uid());
