@@ -59,6 +59,28 @@
 6. Перезапустите workflow (или сделайте push в `main`) и сразу
    зарегистрируйтесь на сайте первым — вы станете администратором.
 
+**Автоматическое обновление схемы.** Workflow
+[`supabase-schema.yml`](.github/workflows/supabase-schema.yml) сам выполняет
+`supabase/schema.sql` после каждого push в `main`, где изменился этот файл, а также
+по кнопке **Actions → Apply Supabase schema → Run workflow**. Скрипт идёт одной
+транзакцией: если что-то упало, база остаётся как была. Для работы нужен секрет
+`SUPABASE_DB_URL`:
+
+1. В Supabase откройте проект и нажмите **Connect** вверху страницы.
+2. Выберите вкладку **Connection String**, тип **URI**, метод **Session pooler**
+   (не *Direct connection*: прямой адрес `db.<проект>.supabase.co` работает только
+   по IPv6, а у серверов GitHub Actions IPv6 нет). Строка выглядит так:
+   `postgresql://postgres.<id-проекта>:[YOUR-PASSWORD]@aws-0-<регион>.pooler.supabase.com:5432/postgres`.
+3. Вместо `[YOUR-PASSWORD]` подставьте пароль базы (задавался при создании
+   проекта; если забыли — **Project Settings → Database → Reset database password**).
+   Если в пароле есть `@ : / ? # %`, замените их на `%40 %3A %2F %3F %23 %25`.
+4. В GitHub: **Settings → Secrets and variables → Actions → Secrets → New repository
+   secret**, имя `SUPABASE_DB_URL`, значение — строка из шага 3.
+5. Проверьте: **Actions → Apply Supabase schema → Run workflow**. Зелёная галочка —
+   схема применена.
+
+Пока секрета нет, автоматический запуск только предупреждает и ничего не делает.
+
 Как публиковать данные: редактор или администратор нажимает «Открыть файлы…»,
 проверяет, что всё разобралось, и нажимает «Опубликовать». Остальные увидят
 новую версию при следующем открытии вкладки. Кнопка «Вернуть опубликованное»
