@@ -490,3 +490,7 @@ body.v-dict .adm-tabs button{white-space:nowrap}
 .rg .occ .ctag{margin-bottom:2px}
 .rg .occ.gone .s{text-decoration:line-through;color:var(--muted)}
 .rg td.chg{background:color-mix(in srgb,var(--del) 6%,transparent)}
+/* ИОТ: поток дисциплин на выбор — одна плашка, подробности в подсказке */
+.ls.iot,.occ.iot{cursor:help}
+.ls.iot .ls-s,.rg .occ.iot .s{font-family:var(--f-mono);font-weight:700;letter-spacing:.08em;color:var(--accent)}
+.ls.iot:focus-visible,.occ.iot:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
