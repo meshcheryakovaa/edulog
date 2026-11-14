@@ -169,7 +169,7 @@ function computeUpload(base,op){
 
 /* ---------- Состояние ---------- */
 let PLAN=null, SCHED=null;
-const st={view:'plan',mode:'group',key:{group:null,teacher:null,room:null},one:{},q:'',wi:0,onlyMis:false,chOnly:false,dtab:'disc',dq:'',donly:false,pf:null};
+const st={view:'plan',mode:'group',key:{group:null,teacher:null,room:null},q:'',wi:0,onlyMis:false,chOnly:false,dtab:'disc',dq:'',donly:false,pf:null};
 try{const s=JSON.parse(localStorage.getItem('plan-sched-view')||'null');if(s){if(s.view) st.view=s.view;if(s.mode) st.mode=s.mode;if(s.dtab) st.dtab=s.dtab;Object.assign(st.key,s.key||{})}}catch(e){}
 function save(){try{localStorage.setItem('plan-sched-view',JSON.stringify({view:st.view,mode:st.mode,key:st.key,dtab:st.dtab}))}catch(e){}}
 const W=()=>SCHED?SCHED.weeks[st.wi]:null;
@@ -868,19 +868,38 @@ function renderSched(key){
   if(CAN_SEEN){if(uns) stats+=`<div class="stat acc"><dt>Не просмотрено изменений</dt><dd>${uns}</dd></div>`}
   else if(chn) stats+=`<div class="stat acc"><dt>Изменено при загрузке</dt><dd>${chn}</dd></div>`;
   const course=mode==='group'&&REG.courses[key]?`<span class="pill mute">${REG.courses[key]} курс</span>`:'';
-  const head=layoutBar(mode,false)+`<section class="head"><div class="head-l"><span class="eyebrow">Расписание ${MODE_NAME[mode]}</span>${titleRow(key)}${course?`<div>${course}</div>`:''}</div>${weekNav(w)}</section>`;
+  const head=`<section class="head"><div class="head-l"><span class="eyebrow">Расписание ${MODE_NAME[mode]}</span>${titleRow(key)}${course?`<div>${course}</div>`:''}</div>${weekNav(w)}</section>`;
   const chp=entityChangesPanel(mode,key,{week:w.key,quiet:true});
   if(!recs.length){main.innerHTML=head+emptyCard('Нет занятий',`На этой неделе в расписании нет занятий: ${esc(label(mode,key))}.`)+chp+(VIEW_ONLY?'':reconPanel(mode,key,w));return}
   main.innerHTML=head+`<dl class="stats">${stats}</dl>
     <div class="legend"><span>Клик по преподавателю, аудитории или группе открывает её расписание</span><span>Правый клик — быстрый просмотр недели</span><span>Во всю ширину — вся группа, слева — 1 подгруппа, справа — 2 подгруппа</span>${chn?'<span>«Новое», «Изменено», «Отменено» — по последней загрузке этой недели</span>':''}</div>
     ${weekTable(cs,mode,w,false,ghosts)}${chp}${mode!=='room'&&!VIEW_ONLY?reconPanel(mode,key,w):''}`;
 }
-/* переключатель вида расписания: одно расписание или сводная таблица (столбцы — группы, преподаватели или аудитории) */
-function layoutBar(mode,grid){
-  const b=(v,t,on)=>`<button role="tab" data-lay="${v}" aria-selected="${on}">${t}</button>`;
-  return `<div class="laybar"><span class="eyebrow">Вид</span><div class="seg" role="tablist" aria-label="Вид расписания">`+
-    b('one','По одному',!grid)+`<span class="seg-sep">Сводная таблица:</span>`+
-    b('group','группы',grid&&mode==='group')+b('teacher','преподаватели',grid&&mode==='teacher')+b('room','аудитории',grid&&mode==='room')+`</div></div>`;
+/* порядок столбцов сводной таблицы — свой у каждого пользователя */
+const SKEY_COLS='edulog-cols';
+let COLORD={};try{COLORD=JSON.parse(localStorage.getItem(SKEY_COLS)||'{}')||{}}catch(e){}
+function saveColOrd(){try{localStorage.setItem(SKEY_COLS,JSON.stringify(COLORD))}catch(e){}
+  if(CLOUD&&window.EduLOGCloud&&window.EduLOGCloud.savePref) window.EduLOGCloud.savePref('cols',COLORD)}
+function applyColOrd(mode,cols){
+  const o=COLORD[mode];if(!o||!o.length) return cols;
+  const ix=new Map(o.map((k,i)=>[k,i]));
+  // новых в сохранённом порядке нет — они идут в конце, в обычном порядке
+  return cols.map((k,i)=>[k,ix.has(k)?ix.get(k):1e6+i]).sort((a,b)=>a[1]-b[1]).map(x=>x[0]);
+}
+function moveCol(mode,cols,from,to){
+  const a=cols.slice();const i=a.indexOf(from);if(i<0) return;a.splice(i,1);
+  let j=to==null?a.length:a.indexOf(to);if(j<0) j=a.length;a.splice(j,0,from);COLORD[mode]=a;saveColOrd();render();
+}
+let GRIDCOLS=[];
+function colLabel(mode,k){return mode==='group'?gShow(k):mode==='teacher'?tShow(k):rShow(k)}
+function colOrdPanel(mode,cols){
+  if(!st.colEdit) return '';
+  const own=!!(COLORD[mode]&&COLORD[mode].length);
+  return `<section class="panel colord" aria-label="Порядок столбцов"><h2>Порядок столбцов<span class="pill mute">виден только вам</span>
+      <span class="sp"></span>${own?'<button class="link sm" data-colreset>вернуть обычный порядок</button>':''}<button class="btn sm" data-coledit>Готово</button></h2>
+    <p class="note">Перетащите название на нужное место или двигайте стрелками. Перетаскивать можно и заголовки столбцов прямо в таблице.</p>
+    <ol class="co-list">${cols.map((k,i)=>`<li draggable="true" data-col="${esc(k)}"><span class="co-h" aria-hidden="true">⋮⋮</span><span class="co-n">${esc(colLabel(mode,k))}</span>
+      <button class="arrow sm" data-colmv="-1" data-k="${esc(k)}" aria-label="Левее"${i?'':' disabled'}>←</button><button class="arrow sm" data-colmv="1" data-k="${esc(k)}" aria-label="Правее"${i<cols.length-1?'':' disabled'}>→</button></li>`).join('')}</ol></section>`;
 }
 /* сводная таблица недели: столбцы — все группы / преподаватели / аудитории, строки — пары по дням */
 function renderGrid(w,mode){
@@ -892,6 +911,7 @@ function renderGrid(w,mode){
   if(mode==='group') cols.sort((a,b)=>(REG.courses[a]||99)-(REG.courses[b]||99)||coll.compare(gShow(a),gShow(b)));
   else if(mode==='teacher') cols.sort((a,b)=>coll.compare(tShow(a),tShow(b)));
   else cols.sort(cmpRooms);
+  cols=applyColOrd(mode,cols);GRIDCOLS=cols;
   const days=[...new Set(w.recs.map(r=>r.day))].sort((a,b)=>a-b);
   let conf=0;
   const clash=(its,k)=>{
@@ -921,9 +941,9 @@ function renderGrid(w,mode){
     return `<td class="${bad?'conf':'busy'}">${its.map(occ).join('')}</td>`;
   };
   const headCell=k=>{
-    if(mode==='room'){const p=NAMES.room.has(k)?{code:rShow(k),owner:''}:roomParts(k);return `<th scope="col"><button class="link" data-go="room" data-key="${esc(k)}" title="${esc(k)}"><b>${esc(p.code)}</b></button>${p.owner?`<small>${esc(p.owner)}</small>`:''}</th>`}
-    if(mode==='teacher') return `<th scope="col"><button class="link" data-go="teacher" data-key="${esc(k)}" title="${esc(tName(k))}"><b>${esc(tShow(k))}</b></button></th>`;
-    return `<th scope="col"><button class="link" data-go="group" data-key="${esc(k)}" title="${esc(k)}"><b>${esc(gShow(k))}</b></button></th>`;
+    if(mode==='room'){const p=NAMES.room.has(k)?{code:rShow(k),owner:''}:roomParts(k);return `<th scope="col" draggable="true" data-col="${esc(k)}"><button class="link" data-go="room" data-key="${esc(k)}" title="${esc(k)}"><b>${esc(p.code)}</b></button>${p.owner?`<small>${esc(p.owner)}</small>`:''}</th>`}
+    if(mode==='teacher') return `<th scope="col" draggable="true" data-col="${esc(k)}"><button class="link" data-go="teacher" data-key="${esc(k)}" title="${esc(tName(k))}"><b>${esc(tShow(k))}</b></button></th>`;
+    return `<th scope="col" draggable="true" data-col="${esc(k)}"><button class="link" data-go="group" data-key="${esc(k)}" title="${esc(k)}"><b>${esc(gShow(k))}</b></button></th>`;
   };
   // у групп над шапкой — строка курсов
   let pre='';
@@ -937,9 +957,10 @@ function renderGrid(w,mode){
     body+=`<tr class="${p===1&&d!==days[0]?'ds':''}">${p===1?`<th class="rg-d" rowspan="${w.maxP}" scope="rowgroup"><span>${DAYS[d-1]} ${esc(w.dates[d]||'')}</span></th>`:''}<th class="rg-p" scope="row"><b>${p}</b> ${esc(tm[0])}</th>${cols.map(k=>td(k,d,p)).join('')}</tr>`;
   }
   const what={group:['Групп','Все группы'],teacher:['Преподавателей','Все преподаватели'],room:['Аудиторий','Все аудитории']}[mode];
-  $('#main').innerHTML=layoutBar(mode,true)+`<section class="head"><div class="head-l"><span class="eyebrow">Сводная таблица</span><h1>${what[1]}</h1></div>${weekNav(w)}</section>
+  const own=!!(COLORD[mode]&&COLORD[mode].length);
+  $('#main').innerHTML=`<section class="head"><div class="head-l"><span class="eyebrow">Сводная таблица</span><h1>${what[1]}</h1><div class="co-bar"><button class="btn ghost sm" data-coledit aria-expanded="${!!st.colEdit}">⇄ Порядок столбцов${own?' · свой':''}</button></div></div>${weekNav(w)}</section>${colOrdPanel(mode,cols)}
     <dl class="stats"><div class="stat"><dt>${what[0]}</dt><dd>${cols.length}</dd></div><div class="stat"><dt>Занятий</dt><dd>${cs.length}</dd></div>${conf?`<div class="stat bad"><dt>Накладки</dt><dd>${conf}</dd></div>`:''}</dl>
-    <div class="legend"><span>Столбцы — ${what[1].toLowerCase()}, строки — пары по дням недели</span><span>Клик по заголовку столбца — его расписание</span><span>Красным — накладки</span></div>
+    <div class="legend"><span>Столбцы — ${what[1].toLowerCase()}, строки — пары по дням недели</span><span>Клик по заголовку столбца — его расписание, перетаскивание — порядок столбцов</span><span>Красным — накладки</span></div>
     <div class="rg-wrap"><table class="rg rg-${mode}"><thead>${pre}<tr><th class="rg-d" scope="col">День</th><th class="rg-p" scope="col">Пара</th>${cols.map(headCell).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
@@ -1304,10 +1325,10 @@ function movePropBy(id,d){
 }
 document.addEventListener('click',e=>{
   const g=e.target.closest('[data-go]');if(g){go(g.dataset.go,g.dataset.key);return}
-  const ly=e.target.closest('[data-lay]');if(ly){const m=ly.dataset.lay;
-    if(m==='one'){if(st.key[st.mode]==='*') st.key[st.mode]=st.one[st.mode]||null}
-    else{if(st.key[m]!=='*') st.one[m]=st.key[m];st.mode=m;st.key[m]='*'}
-    st.q='';$('#q').value='';render();return}
+  if(e.target.closest('[data-coledit]')){st.colEdit=!st.colEdit;render();return}
+  if(e.target.closest('[data-colreset]')){delete COLORD[st.mode];saveColOrd();render();return}
+  const cm=e.target.closest('[data-colmv]');if(cm){const c=GRIDCOLS,i=c.indexOf(cm.dataset.k),d=+cm.dataset.colmv;if(i<0||!c[i+d]) return;
+    moveCol(st.mode,c,cm.dataset.k,d<0?c[i-1]:(c[i+2]??null));return}
   const s=e.target.closest('[data-step]');
   if(s){const ps=LIST.filter(i=>i.present&&!i.all);if(ps.length<2) return;const i=ps.findIndex(x=>x.key===st.key[st.mode]);
     st.key[st.mode]=ps[((i<0?0:i)+(+s.dataset.step)+ps.length)%ps.length].key;render();return}
@@ -1346,6 +1367,13 @@ document.addEventListener('change',e=>{
   }
   const z=e.target.closest('[data-zc]');if(z) setFlag(z.dataset.zg.split('\n'),z.dataset.zc,z.checked);
 });
+let DRAGCOL=null;
+document.addEventListener('dragstart',e=>{const c=e.target.closest&&e.target.closest('[data-col]');if(!c) return;DRAGCOL=c.dataset.col;e.dataTransfer.effectAllowed='move';try{e.dataTransfer.setData('text/plain',DRAGCOL)}catch(_){}c.classList.add('dragging')});
+document.addEventListener('dragover',e=>{if(DRAGCOL==null) return;const c=e.target.closest&&e.target.closest('[data-col]');if(!c) return;e.preventDefault();
+  document.querySelectorAll('.drop-to').forEach(x=>x!==c&&x.classList.remove('drop-to'));c.classList.add('drop-to')});
+document.addEventListener('drop',e=>{if(DRAGCOL==null) return;const c=e.target.closest&&e.target.closest('[data-col]');e.preventDefault();
+  const from=DRAGCOL;DRAGCOL=null;if(c&&c.dataset.col!==from) moveCol(st.mode,GRIDCOLS,from,c.dataset.col);else render()});
+document.addEventListener('dragend',()=>{if(DRAGCOL!=null){DRAGCOL=null;render()}});
 document.addEventListener('contextmenu',e=>{
   if(st.view!=='sched'||!SCHED) return;
   const g=e.target.closest('[data-go]');if(!g) return;

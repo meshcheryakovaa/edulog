@@ -450,3 +450,15 @@ body.v-dict .adm-tabs button{white-space:nowrap}
 .rg-group td,.rg-teacher td{max-width:180px}
 .rg-group td,.rg-teacher td{width:170px;min-width:170px}
 .rg .sgs>div,.rg .occ{min-width:0}
+.co-bar{margin-top:2px}
+.colord h2{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.colord .sp{flex:1}
+.co-list{list-style:none;margin:8px 0 0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:6px;max-height:300px;overflow:auto;counter-reset:co}
+.co-list li{counter-increment:co;display:flex;align-items:center;gap:6px;padding:4px 6px;border:1px solid var(--rule);border-radius:6px;background:var(--surface);cursor:grab}
+.co-list li::before{content:counter(co);font-family:var(--f-mono);font-size:11px;color:var(--muted);min-width:18px;text-align:right}
+.co-list .co-h{color:var(--muted);letter-spacing:-2px}
+.co-list .co-n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.co-list .arrow.sm{width:24px;height:24px;font-size:12px}
+.rg thead th[draggable]{cursor:grab}
+.dragging{opacity:.45}
+.drop-to{box-shadow:inset 3px 0 0 var(--accent)}
