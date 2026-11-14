@@ -361,7 +361,7 @@ function showGate(mode,note,isErr){
   gateMode=mode||gateMode;
   document.body.classList.add('gated');gate.hidden=false;
   const msg=note?`<p class="gmsg${isErr?' err':''}" role="${isErr?'alert':'status'}">${esc(note)}</p>`:'';
-  const brand=`<p class="brand">План и расписание</p>`;
+  const brand=`<p class="brand">EduLOG</p>`;
   let body='';
   if(gateMode==='in'||gateMode==='up'){
     body=`<div class="gtabs" role="tablist">
