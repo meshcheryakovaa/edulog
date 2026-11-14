@@ -50,7 +50,7 @@ button{font:inherit;color:inherit}
   padding-block:20px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 .side{background:var(--surface);border:1px solid var(--rule);border-radius:8px;display:flex;flex-direction:column;
   position:sticky;top:16px;max-height:calc(100vh - 32px);min-height:0}
-.tabs{display:grid;grid-template-columns:repeat(3,1fr);border-bottom:1px solid var(--rule)}
+.tabs{display:grid;grid-template-columns:repeat(auto-fit,minmax(0,1fr));border-bottom:1px solid var(--rule)}
 .tab{border:0;background:none;padding:10px 4px;font-size:13px;font-weight:500;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}
 .tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
 .search{padding:10px}

@@ -685,7 +685,8 @@ function renderList(){
   } else el.innerHTML=its.map(btn).join('');
 }
 function renderTabs(){
-  document.querySelectorAll('.tab').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.mode===st.mode)));
+  // роль «Просмотр» видит только расписание групп
+  document.querySelectorAll('.tab').forEach(b=>{b.setAttribute('aria-selected',String(b.dataset.mode===st.mode));b.hidden=VIEW_ONLY&&b.dataset.mode!=='group'});
   document.querySelectorAll('.seg [data-view]').forEach(b=>{b.setAttribute('aria-selected',String(b.dataset.view===st.view));if(b.dataset.view!=='admin') b.hidden=VIEW_ONLY&&b.dataset.view!=='sched'});
   // счётчик непросмотренных изменений текущей недели (по всем группам) на вкладке «Расписание»
   const sb=$('#view-sched'),w=W(),nu=CAN_SEEN&&w?weekUnseen(w.key).length:0;
@@ -786,8 +787,8 @@ function renderPlan(key){
 let ZROWS=[],PROWS=[];
 
 /* ---------- Вид «Расписание» ---------- */
-const linkT=t=>`<button class="link" data-go="teacher" data-key="${esc(t.key)}"${tip(tShow(t.key),tName(t.key))}>${esc(tShow(t.key))}</button>`;
-const linkR=r=>`<button class="link" data-go="room" data-key="${esc(r)}"${tip(rShow(r),r)}>${esc(rShow(r))}</button>`;
+const linkT=t=>VIEW_ONLY?`<span${tip(tShow(t.key),tName(t.key))}>${esc(tShow(t.key))}</span>`:`<button class="link" data-go="teacher" data-key="${esc(t.key)}"${tip(tShow(t.key),tName(t.key))}>${esc(tShow(t.key))}</button>`;
+const linkR=r=>VIEW_ONLY?`<span${tip(rShow(r),r)}>${esc(rShow(r))}</span>`:`<button class="link" data-go="room" data-key="${esc(r)}"${tip(rShow(r),r)}>${esc(rShow(r))}</button>`;
 const linkG=g=>`<button class="link" data-go="group" data-key="${esc(g)}"${tip(gShow(g),g)}>${esc(gShow(g))}</button>`;
 function lessonCard(c,mode,w,compact){
   const tm=w.times[c.period]||['',''];
@@ -872,7 +873,7 @@ function renderSched(key){
   const chp=entityChangesPanel(mode,key,{week:w.key,quiet:true});
   if(!recs.length){main.innerHTML=head+emptyCard('Нет занятий',`На этой неделе в расписании нет занятий: ${esc(label(mode,key))}.`)+chp+(VIEW_ONLY?'':reconPanel(mode,key,w));return}
   main.innerHTML=head+`<dl class="stats">${stats}</dl>
-    <div class="legend"><span>Клик по преподавателю, аудитории или группе открывает её расписание</span><span>Правый клик — быстрый просмотр недели</span><span>Во всю ширину — вся группа, слева — 1 подгруппа, справа — 2 подгруппа</span>${chn?'<span>«Новое», «Изменено», «Отменено» — по последней загрузке этой недели</span>':''}</div>
+    <div class="legend">${VIEW_ONLY?'':'<span>Клик по преподавателю, аудитории или группе открывает её расписание</span><span>Правый клик — быстрый просмотр недели</span>'}<span>Во всю ширину — вся группа, слева — 1 подгруппа, справа — 2 подгруппа</span>${chn?'<span>«Новое», «Изменено», «Отменено» — по последней загрузке этой недели</span>':''}</div>
     ${weekTable(cs,mode,w,false,ghosts)}${chp}${mode!=='room'&&!VIEW_ONLY?reconPanel(mode,key,w):''}`;
 }
 /* столбцы сводной таблицы: порядок и скрытые — свои у каждого пользователя.
@@ -1237,6 +1238,7 @@ function closePreview(){$('#modal').hidden=true;document.body.classList.remove('
 /* ---------- Отрисовка ---------- */
 function render(){
   if(VIEW_ONLY&&st.view!=='sched'&&st.view!=='admin') st.view='sched';
+  if(VIEW_ONLY&&st.mode!=='group') st.mode='group';
   renderTabs();
   document.body.classList.toggle('v-admin',st.view==='admin');
   document.body.classList.toggle('v-dict',st.view==='dict');
@@ -1316,9 +1318,9 @@ addEventListener('dragover',e=>e.preventDefault());
 addEventListener('drop',e=>{e.preventDefault();dragN=0;$('#drop').hidden=true;openFiles([...e.dataTransfer.files])});
 
 /* ---------- Навигация ---------- */
-function go(mode,key){st.mode=mode;st.key[mode]=key;st.q='';$('#q').value='';closePreview();render();scrollTo({top:0})}
+function go(mode,key){if(VIEW_ONLY&&mode!=='group') return;st.mode=mode;st.key[mode]=key;st.q='';$('#q').value='';closePreview();render();scrollTo({top:0})}
 document.querySelector('.seg').addEventListener('click',e=>{const b=e.target.closest('[data-view]');if(!b) return;st.view=b.dataset.view;render()});
-document.querySelector('.tabs').addEventListener('click',e=>{const b=e.target.closest('.tab');if(!b) return;st.mode=b.dataset.mode;st.q='';$('#q').value='';render()});
+document.querySelector('.tabs').addEventListener('click',e=>{const b=e.target.closest('.tab');if(!b||b.hidden) return;st.mode=b.dataset.mode;st.q='';$('#q').value='';render()});
 $('#list').addEventListener('click',e=>{const b=e.target.closest('.item');if(!b) return;st.key[st.mode]=b.dataset.key;render();if(innerWidth<=820) $('#main').scrollIntoView({behavior:'smooth'})});
 $('#q').addEventListener('input',e=>{st.q=e.target.value;renderList()});
 document.addEventListener('input',e=>{if(e.target.id==='dq'){st.dq=e.target.value;fillDict()}});
@@ -1395,7 +1397,7 @@ document.addEventListener('dragend',()=>{if(DRAGCOL!=null){DRAGCOL=null;render()
 document.addEventListener('contextmenu',e=>{
   if(st.view!=='sched'||!SCHED) return;
   const g=e.target.closest('[data-go]');if(!g) return;
-  e.preventDefault();openPreview(g.dataset.go,g.dataset.key);
+  e.preventDefault();if(VIEW_ONLY&&g.dataset.go!=='group') return;openPreview(g.dataset.go,g.dataset.key);
 });
 $('#modalOpen').addEventListener('click',()=>{if(PREV) go(PREV.mode,PREV.key)});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#modal').hidden) closePreview()});
