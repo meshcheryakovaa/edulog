@@ -462,3 +462,13 @@ body.v-dict .adm-tabs button{white-space:nowrap}
 .rg thead th[draggable]{cursor:grab}
 .dragging{opacity:.45}
 .drop-to{box-shadow:inset 3px 0 0 var(--accent)}
+.co-ctl{display:flex;justify-content:center;gap:3px;margin-bottom:4px}
+.arrow.xs{width:22px;height:20px;font-size:12px;border-radius:4px}
+.arrow.xs[data-colhide]:hover{color:var(--bad);border-color:var(--bad)}
+.rg.co-edit thead th[data-col]{background:var(--accent-soft)}
+.drop-to.drop-r{box-shadow:inset -3px 0 0 var(--accent)}
+.co-note{margin:6px 0 0;padding:6px 10px;border-radius:6px;background:var(--accent-soft);font-size:13px}
+.co-info{margin:-4px 0 10px;font-size:13px;color:var(--muted)}
+.co-hid{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:10px}
+.chip{border:1px dashed var(--rule);background:var(--surface);border-radius:999px;padding:2px 10px;font:inherit;font-size:12.5px;cursor:pointer;color:var(--ink)}
+.chip:hover{border-color:var(--accent);color:var(--accent)}

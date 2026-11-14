@@ -594,7 +594,7 @@ document.addEventListener('change',e=>{
 });
 
 /* ---------- Экспорт для app.js ---------- */
-window.EduLOGCloud={saveFlag,saveFlags,saveDict,saveSeen,isAdmin,renderAdmin,onSources};
+window.EduLOGCloud={userName:()=>ME?(ME.full_name||ME.email||''):'',saveFlag,saveFlags,saveDict,saveSeen,isAdmin,renderAdmin,onSources};
 
 /* ---------- Старт ---------- */
 (async()=>{

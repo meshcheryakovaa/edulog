@@ -875,31 +875,39 @@ function renderSched(key){
     <div class="legend"><span>Клик по преподавателю, аудитории или группе открывает её расписание</span><span>Правый клик — быстрый просмотр недели</span><span>Во всю ширину — вся группа, слева — 1 подгруппа, справа — 2 подгруппа</span>${chn?'<span>«Новое», «Изменено», «Отменено» — по последней загрузке этой недели</span>':''}</div>
     ${weekTable(cs,mode,w,false,ghosts)}${chp}${mode!=='room'&&!VIEW_ONLY?reconPanel(mode,key,w):''}`;
 }
-/* порядок столбцов сводной таблицы — свой у каждого пользователя */
+/* столбцы сводной таблицы: порядок и скрытые — свои у каждого пользователя.
+   COLS[mode] = {o:[ключи по порядку], h:[скрытые]} */
 const SKEY_COLS='edulog-cols';
-let COLORD={};try{COLORD=JSON.parse(localStorage.getItem(SKEY_COLS)||'{}')||{}}catch(e){}
-function saveColOrd(){try{localStorage.setItem(SKEY_COLS,JSON.stringify(COLORD))}catch(e){}
-  if(CLOUD&&window.EduLOGCloud&&window.EduLOGCloud.savePref) window.EduLOGCloud.savePref('cols',COLORD)}
+let COLS={};try{COLS=JSON.parse(localStorage.getItem(SKEY_COLS)||'{}')||{}}catch(e){}
+const colCfg=mode=>COLS[mode]||(COLS[mode]={o:[],h:[]});
+function saveCols(){
+  for(const m of Object.keys(COLS)){const c=COLS[m];if(!c.o.length&&!c.h.length) delete COLS[m]}
+  try{localStorage.setItem(SKEY_COLS,JSON.stringify(COLS))}catch(e){}
+  if(CLOUD&&window.EduLOGCloud&&window.EduLOGCloud.savePref) window.EduLOGCloud.savePref('cols',COLS);
+}
+const colsOwn=mode=>!!(COLS[mode]&&(COLS[mode].o.length||COLS[mode].h.length));
 function applyColOrd(mode,cols){
-  const o=COLORD[mode];if(!o||!o.length) return cols;
+  const o=(COLS[mode]&&COLS[mode].o)||[];if(!o.length) return cols;
   const ix=new Map(o.map((k,i)=>[k,i]));
   // новых в сохранённом порядке нет — они идут в конце, в обычном порядке
   return cols.map((k,i)=>[k,ix.has(k)?ix.get(k):1e6+i]).sort((a,b)=>a[1]-b[1]).map(x=>x[0]);
 }
-function moveCol(mode,cols,from,to){
-  const a=cols.slice();const i=a.indexOf(from);if(i<0) return;a.splice(i,1);
-  let j=to==null?a.length:a.indexOf(to);if(j<0) j=a.length;a.splice(j,0,from);COLORD[mode]=a;saveColOrd();render();
+// all — все столбцы по порядку, включая скрытые; to — перед каким поставить (null — в конец)
+function moveCol(mode,all,from,to){
+  const a=all.slice();const i=a.indexOf(from);if(i<0) return;a.splice(i,1);
+  let j=to==null?a.length:a.indexOf(to);if(j<0) j=a.length;a.splice(j,0,from);colCfg(mode).o=a;saveCols();render();
 }
-let GRIDCOLS=[];
+function hideCol(mode,k,on){const c=colCfg(mode);c.h=c.h.filter(x=>x!==k);if(on) c.h.push(k);saveCols();render()}
+let GRIDALL=[];
 function colLabel(mode,k){return mode==='group'?gShow(k):mode==='teacher'?tShow(k):rShow(k)}
-function colOrdPanel(mode,cols){
-  if(!st.colEdit) return '';
-  const own=!!(COLORD[mode]&&COLORD[mode].length);
-  return `<section class="panel colord" aria-label="Порядок столбцов"><h2>Порядок столбцов<span class="pill mute">виден только вам</span>
-      <span class="sp"></span>${own?'<button class="link sm" data-colreset>вернуть обычный порядок</button>':''}<button class="btn sm" data-coledit>Готово</button></h2>
-    <p class="note">Перетащите название на нужное место или двигайте стрелками. Перетаскивать можно и заголовки столбцов прямо в таблице.</p>
-    <ol class="co-list">${cols.map((k,i)=>`<li draggable="true" data-col="${esc(k)}"><span class="co-h" aria-hidden="true">⋮⋮</span><span class="co-n">${esc(colLabel(mode,k))}</span>
-      <button class="arrow sm" data-colmv="-1" data-k="${esc(k)}" aria-label="Левее"${i?'':' disabled'}>←</button><button class="arrow sm" data-colmv="1" data-k="${esc(k)}" aria-label="Правее"${i<cols.length-1?'':' disabled'}>→</button></li>`).join('')}</ol></section>`;
+function userName(){const n=window.EduLOGCloud&&window.EduLOGCloud.userName&&window.EduLOGCloud.userName();return n||''}
+function colBar(mode,all,hidden){
+  const who=userName();
+  const note=`<p class="co-note">${who?`Порядок и скрытые столбцы сохраняются только для пользователя <b>${esc(who)}</b>.`:'Порядок и скрытые столбцы сохраняются только в этом браузере.'} У остальных пользователей прежний порядок, все столбцы видны.</p>`;
+  const hid=hidden.length?`<div class="co-hid"><span class="eyebrow">Скрыто: ${hidden.length}</span>${hidden.map(k=>`<button class="chip" data-colshow="${esc(k)}" title="Показать столбец">${esc(colLabel(mode,k))} <span aria-hidden="true">＋</span></button>`).join('')}${hidden.length>1?'<button class="link sm" data-colshowall>показать все</button>':''}</div>`:'';
+  if(!st.colEdit) return (colsOwn(mode)?`<div class="co-info">Свой порядок столбцов${hidden.length?`, скрыто: ${hidden.length}`:''} (видно только вам).</div>`:'');
+  return `<section class="panel colord" aria-label="Настройка столбцов"><h2>Настройка столбцов<span class="sp"></span>${colsOwn(mode)?'<button class="link sm" data-colreset>вернуть обычный порядок</button>':''}<button class="btn sm" data-coledit>Готово</button></h2>
+    <p class="note">Стрелки над названием двигают столбец влево и вправо, × скрывает его. Заголовок столбца можно перетащить мышкой на новое место.</p>${note}${hid}</section>`;
 }
 /* сводная таблица недели: столбцы — все группы / преподаватели / аудитории, строки — пары по дням */
 function renderGrid(w,mode){
@@ -911,7 +919,8 @@ function renderGrid(w,mode){
   if(mode==='group') cols.sort((a,b)=>(REG.courses[a]||99)-(REG.courses[b]||99)||coll.compare(gShow(a),gShow(b)));
   else if(mode==='teacher') cols.sort((a,b)=>coll.compare(tShow(a),tShow(b)));
   else cols.sort(cmpRooms);
-  cols=applyColOrd(mode,cols);GRIDCOLS=cols;
+  cols=applyColOrd(mode,cols);GRIDALL=cols;
+  const hidden=cols.filter(k=>colCfg(mode).h.includes(k));cols=cols.filter(k=>!hidden.includes(k));
   const days=[...new Set(w.recs.map(r=>r.day))].sort((a,b)=>a-b);
   let conf=0;
   const clash=(its,k)=>{
@@ -940,10 +949,12 @@ function renderGrid(w,mode){
     }
     return `<td class="${bad?'conf':'busy'}">${its.map(occ).join('')}</td>`;
   };
+  const ctl=k=>{if(!st.colEdit) return '';const i=cols.indexOf(k);
+    return `<div class="co-ctl"><button class="arrow xs" data-colmv="-1" data-k="${esc(k)}" aria-label="Левее"${i?'':' disabled'}>←</button><button class="arrow xs" data-colhide="${esc(k)}" aria-label="Скрыть столбец" title="Скрыть столбец">×</button><button class="arrow xs" data-colmv="1" data-k="${esc(k)}" aria-label="Правее"${i<cols.length-1?'':' disabled'}>→</button></div>`};
   const headCell=k=>{
-    if(mode==='room'){const p=NAMES.room.has(k)?{code:rShow(k),owner:''}:roomParts(k);return `<th scope="col" draggable="true" data-col="${esc(k)}"><button class="link" data-go="room" data-key="${esc(k)}" title="${esc(k)}"><b>${esc(p.code)}</b></button>${p.owner?`<small>${esc(p.owner)}</small>`:''}</th>`}
-    if(mode==='teacher') return `<th scope="col" draggable="true" data-col="${esc(k)}"><button class="link" data-go="teacher" data-key="${esc(k)}" title="${esc(tName(k))}"><b>${esc(tShow(k))}</b></button></th>`;
-    return `<th scope="col" draggable="true" data-col="${esc(k)}"><button class="link" data-go="group" data-key="${esc(k)}" title="${esc(k)}"><b>${esc(gShow(k))}</b></button></th>`;
+    if(mode==='room'){const p=NAMES.room.has(k)?{code:rShow(k),owner:''}:roomParts(k);return `<th scope="col" draggable="true" data-col="${esc(k)}">${ctl(k)}<button class="link" data-go="room" data-key="${esc(k)}" title="${esc(k)}"><b>${esc(p.code)}</b></button>${p.owner?`<small>${esc(p.owner)}</small>`:''}</th>`}
+    if(mode==='teacher') return `<th scope="col" draggable="true" data-col="${esc(k)}">${ctl(k)}<button class="link" data-go="teacher" data-key="${esc(k)}" title="${esc(tName(k))}"><b>${esc(tShow(k))}</b></button></th>`;
+    return `<th scope="col" draggable="true" data-col="${esc(k)}">${ctl(k)}<button class="link" data-go="group" data-key="${esc(k)}" title="${esc(k)}"><b>${esc(gShow(k))}</b></button></th>`;
   };
   // у групп над шапкой — строка курсов
   let pre='';
@@ -957,11 +968,10 @@ function renderGrid(w,mode){
     body+=`<tr class="${p===1&&d!==days[0]?'ds':''}">${p===1?`<th class="rg-d" rowspan="${w.maxP}" scope="rowgroup"><span>${DAYS[d-1]} ${esc(w.dates[d]||'')}</span></th>`:''}<th class="rg-p" scope="row"><b>${p}</b> ${esc(tm[0])}</th>${cols.map(k=>td(k,d,p)).join('')}</tr>`;
   }
   const what={group:['Групп','Все группы'],teacher:['Преподавателей','Все преподаватели'],room:['Аудиторий','Все аудитории']}[mode];
-  const own=!!(COLORD[mode]&&COLORD[mode].length);
-  $('#main').innerHTML=`<section class="head"><div class="head-l"><span class="eyebrow">Сводная таблица</span><h1>${what[1]}</h1><div class="co-bar"><button class="btn ghost sm" data-coledit aria-expanded="${!!st.colEdit}">⇄ Порядок столбцов${own?' · свой':''}</button></div></div>${weekNav(w)}</section>${colOrdPanel(mode,cols)}
-    <dl class="stats"><div class="stat"><dt>${what[0]}</dt><dd>${cols.length}</dd></div><div class="stat"><dt>Занятий</dt><dd>${cs.length}</dd></div>${conf?`<div class="stat bad"><dt>Накладки</dt><dd>${conf}</dd></div>`:''}</dl>
+  $('#main').innerHTML=`<section class="head"><div class="head-l"><span class="eyebrow">Сводная таблица</span><h1>${what[1]}</h1>${st.colEdit?'':`<div class="co-bar"><button class="btn ghost sm" data-coledit>⇄ Настроить столбцы</button></div>`}</div>${weekNav(w)}</section>${colBar(mode,GRIDALL,hidden)}
+    <dl class="stats"><div class="stat"><dt>${what[0]}</dt><dd>${cols.length}${hidden.length?` <small>из ${GRIDALL.length}</small>`:''}</dd></div><div class="stat"><dt>Занятий</dt><dd>${cs.length}</dd></div>${conf?`<div class="stat bad"><dt>Накладки</dt><dd>${conf}</dd></div>`:''}</dl>
     <div class="legend"><span>Столбцы — ${what[1].toLowerCase()}, строки — пары по дням недели</span><span>Клик по заголовку столбца — его расписание, перетаскивание — порядок столбцов</span><span>Красным — накладки</span></div>
-    <div class="rg-wrap"><table class="rg rg-${mode}"><thead>${pre}<tr><th class="rg-d" scope="col">День</th><th class="rg-p" scope="col">Пара</th>${cols.map(headCell).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
+    <div class="rg-wrap"><table class="rg rg-${mode}${st.colEdit?' co-edit':''}"><thead>${pre}<tr><th class="rg-d" scope="col">День</th><th class="rg-p" scope="col">Пара</th>${cols.map(headCell).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
 /* ---------- Отображение изменений ---------- */
@@ -1326,9 +1336,14 @@ function movePropBy(id,d){
 document.addEventListener('click',e=>{
   const g=e.target.closest('[data-go]');if(g){go(g.dataset.go,g.dataset.key);return}
   if(e.target.closest('[data-coledit]')){st.colEdit=!st.colEdit;render();return}
-  if(e.target.closest('[data-colreset]')){delete COLORD[st.mode];saveColOrd();render();return}
-  const cm=e.target.closest('[data-colmv]');if(cm){const c=GRIDCOLS,i=c.indexOf(cm.dataset.k),d=+cm.dataset.colmv;if(i<0||!c[i+d]) return;
-    moveCol(st.mode,c,cm.dataset.k,d<0?c[i-1]:(c[i+2]??null));return}
+  if(e.target.closest('[data-colreset]')){delete COLS[st.mode];saveCols();render();return}
+  const ch=e.target.closest('[data-colhide]');if(ch){hideCol(st.mode,ch.dataset.colhide,true);return}
+  const cv=e.target.closest('[data-colshow]');if(cv){hideCol(st.mode,cv.dataset.colshow,false);return}
+  if(e.target.closest('[data-colshowall]')){colCfg(st.mode).h=[];saveCols();render();return}
+  const cm=e.target.closest('[data-colmv]');if(cm){
+    // соседний видимый столбец — через скрытые перешагиваем
+    const h=colCfg(st.mode).h,vis=GRIDALL.filter(k=>!h.includes(k)),k=cm.dataset.k,i=vis.indexOf(k),d=+cm.dataset.colmv,nb=vis[i+d];if(i<0||!nb) return;
+    const all=GRIDALL;moveCol(st.mode,all,k,d<0?nb:(all[all.indexOf(nb)+1]??null));return}
   const s=e.target.closest('[data-step]');
   if(s){const ps=LIST.filter(i=>i.present&&!i.all);if(ps.length<2) return;const i=ps.findIndex(x=>x.key===st.key[st.mode]);
     st.key[st.mode]=ps[((i<0?0:i)+(+s.dataset.step)+ps.length)%ps.length].key;render();return}
@@ -1370,9 +1385,9 @@ document.addEventListener('change',e=>{
 let DRAGCOL=null;
 document.addEventListener('dragstart',e=>{const c=e.target.closest&&e.target.closest('[data-col]');if(!c) return;DRAGCOL=c.dataset.col;e.dataTransfer.effectAllowed='move';try{e.dataTransfer.setData('text/plain',DRAGCOL)}catch(_){}c.classList.add('dragging')});
 document.addEventListener('dragover',e=>{if(DRAGCOL==null) return;const c=e.target.closest&&e.target.closest('[data-col]');if(!c) return;e.preventDefault();
-  document.querySelectorAll('.drop-to').forEach(x=>x!==c&&x.classList.remove('drop-to'));c.classList.add('drop-to')});
+  document.querySelectorAll('.drop-to').forEach(x=>x!==c&&x.classList.remove('drop-to'));c.classList.add('drop-to');c.classList.toggle('drop-r',GRIDALL.indexOf(DRAGCOL)<GRIDALL.indexOf(c.dataset.col))});
 document.addEventListener('drop',e=>{if(DRAGCOL==null) return;const c=e.target.closest&&e.target.closest('[data-col]');e.preventDefault();
-  const from=DRAGCOL;DRAGCOL=null;if(c&&c.dataset.col!==from) moveCol(st.mode,GRIDCOLS,from,c.dataset.col);else render()});
+  const from=DRAGCOL;DRAGCOL=null;if(c&&c.dataset.col!==from){const A=GRIDALL,t=c.dataset.col;moveCol(st.mode,A,from,A.indexOf(from)<A.indexOf(t)?(A[A.indexOf(t)+1]??null):t)}else render()});
 document.addEventListener('dragend',()=>{if(DRAGCOL!=null){DRAGCOL=null;render()}});
 document.addEventListener('contextmenu',e=>{
   if(st.view!=='sched'||!SCHED) return;
